@@ -1,33 +1,42 @@
-use log::{info, trace};
+use log::trace;
 
 use crate::midi_command::{CommandType, MidiCommand};
 use crate::recovery_journal::recovery_journal::RecoveryJournal;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MidiPacket {
-    pub commands: Vec<(u32, MidiCommand)>, // MIDI commands with delta times and variable-length command data
+    pub commands: Vec<MidiCommand>, // MIDI commands with delta times and variable-length command data
     pub recovery_journal: Option<RecoveryJournal>, // Optional recovery journal
 }
 
 impl MidiPacket {
-    pub fn parse(bytes: &[u8]) -> Option<Self> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
         let mut i: usize = 0;
         let (header, header_length) = MidiPacketHeader::parse(bytes)?;
-
         i += header_length;
 
         let (commands, commands_length) =
-            Self::parse_commands(&bytes[i..], header.z_flag, header.length)?;
-
+            match Self::parse_commands(&bytes[i..], header.z_flag, header.length) {
+                Ok((commands, length)) => (commands, length),
+                Err(e) => {
+                    return Err(e); // Error parsing commands
+                }
+            };
         i += commands_length;
 
         let recovery_journal = if header.j_flag {
-            RecoveryJournal::parse(&bytes[i..])
+            match RecoveryJournal::parse(&bytes[i..]) {
+                Ok(journal) => Some(journal),
+                Err(e) => {
+                    return Err(format!("Error parsing recovery journal: {}", e));
+                }
+            }
         } else {
             None
         };
 
-        Some(Self {
+        Ok(Self {
             commands,
             recovery_journal,
         })
@@ -35,6 +44,7 @@ impl MidiPacket {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MidiPacketHeader {
     pub version: u8,       // Version (should be 2)
     pub p_flag: bool,      // P flag (should be 0)
@@ -52,9 +62,9 @@ pub struct MidiPacketHeader {
 }
 
 impl MidiPacketHeader {
-    pub fn parse(bytes: &[u8]) -> Option<(Self, usize)> {
+    pub fn parse(bytes: &[u8]) -> Result<(Self, usize), String> {
         if bytes.len() < 13 {
-            return None; // Not enough data for a valid MIDI packet header
+            return Err("Not enough data for a valid MIDI packet header".to_string());
         }
 
         let version = (bytes[0] >> 6) & 0b11;
@@ -65,29 +75,24 @@ impl MidiPacketHeader {
         let pt = bytes[1] & 0b0111_1111;
 
         if version != 2 || p_flag || x_flag || cc != 0 || pt != 0x61 {
-            return None; // Invalid header fields
+            return Err("Invalid header fields".to_string());
         }
 
-        let timestamp = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-        let ssrc = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        let timestamp = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
+        let ssrc = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
 
         let b_flag = (bytes[12] & 0b1000_0000) != 0;
         let j_flag = (bytes[12] & 0b0100_0000) != 0;
         let z_flag = (bytes[12] & 0b0010_0000) != 0;
         let p_flag_data = (bytes[12] & 0b0001_0000) != 0;
         let length = if b_flag {
-            let len_high = (bytes[12] & 0b0000_1111) as u16;
-            if bytes.len() < 14 {
-                return None;
-            }
-            let len_low = bytes[13] as u16;
-            (len_high << 8) | len_low
+            u16::from_be_bytes([bytes[12] & 0b0000_1111, bytes[13]])
         } else {
             (bytes[12] & 0b0000_1111) as u16
         };
 
         let header_length = if b_flag { 14 } else { 13 };
-        Some((
+        Ok((
             Self {
                 version,
                 p_flag,
@@ -113,57 +118,40 @@ impl MidiPacket {
         bytes: &[u8],
         z_flag: bool,
         length: u16,
-    ) -> Option<(Vec<(u32, MidiCommand)>, usize)> {
+    ) -> Result<(Vec<MidiCommand>, usize), String> {
         let mut commands = Vec::new();
         let mut i: usize = 0;
+        trace!("About to read {} bytes", length);
 
-        if length > 3 {
-            info!("About to read {} bytes", length);
-        } else {
-            trace!("About to read {} bytes", length);
-        }
-
-        let mut running_status: CommandType = CommandType::Unknown;
+        let mut running_status: Option<CommandType> = None;
+        let mut running_channel: Option<u8> = None;
 
         while i < length as usize {
-            let delta_time = if i > 0 || z_flag {
-                let (delta_time, delta_time_length) = Self::parse_delta_time(&bytes[i..]);
-                i += delta_time_length;
-                trace!("Delta time: {}, {} bytes", delta_time, delta_time_length);
-                delta_time
-            } else {
-                0
-            };
-
             if i >= bytes.len() {
-                return None;
+                return Err("Not enough data for MIDI command".to_string());
             }
+
+            let has_delta_time = i > 0 || z_flag;
 
             let command_bytes = bytes[i..].to_vec();
-            let (command, command_length) =
-                MidiCommand::from_bytes(&command_bytes, running_status)?;
-            running_status = command.command;
-
-            i += command_length;
-            commands.push((delta_time, command));
-        }
-
-        Some((commands, i))
-    }
-
-    fn parse_delta_time(bytes: &[u8]) -> (u32, usize) {
-        let mut delta_time = 0u32;
-        let mut i = 0;
-
-        loop {
-            let byte = bytes[i];
-            i += 1;
-            delta_time = (delta_time << 7) | (byte & 0b0111_1111) as u32;
-            if byte & 0b1000_0000 == 0 {
-                break;
+            match MidiCommand::from_bytes(
+                &command_bytes,
+                has_delta_time,
+                running_status,
+                running_channel,
+            ) {
+                Ok((command, length)) => {
+                    running_status = Some(command.command);
+                    running_channel = Some(command.channel);
+                    i += length;
+                    commands.push(command);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
             }
         }
 
-        (delta_time, i)
+        Ok((commands, i))
     }
 }

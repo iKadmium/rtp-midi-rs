@@ -1,6 +1,5 @@
-use super::recovery_journal::Chapter;
-
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ProgramChangeChapter {
     pub s: bool,
     pub program: u8,
@@ -10,10 +9,10 @@ pub struct ProgramChangeChapter {
     pub bank_lsb: u8,
 }
 
-impl Chapter for ProgramChangeChapter {
-    fn parse(data: &[u8]) -> Option<(Self, usize)> {
+impl ProgramChangeChapter {
+    pub fn parse(data: &[u8]) -> Result<(Self, usize), String> {
         if data.len() < 3 {
-            return None;
+            return Err("Data length is less than 3".to_string());
         }
 
         let s = (data[0] & 0b1000_0000) != 0;
@@ -23,7 +22,7 @@ impl Chapter for ProgramChangeChapter {
         let x = (data[2] & 0b1000_0000) != 0;
         let bank_lsb = data[2] & 0b0111_1111;
 
-        Some((
+        Ok((
             Self {
                 s,
                 program,

@@ -14,14 +14,10 @@ impl SessionInitiationPacket {
             return Err("Buffer too short to be a valid session initiation packet".to_string());
         }
 
-        if !Self::has_valid_header(buffer) {
-            return Err("Invalid header: does not start with 0xFFFF".to_string());
-        }
-
         let command = [buffer[2], buffer[3]];
-        let protocol_version = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
-        let initiator_token = u32::from_be_bytes([buffer[8], buffer[9], buffer[10], buffer[11]]);
-        let sender_ssrc = u32::from_be_bytes([buffer[12], buffer[13], buffer[14], buffer[15]]);
+        let protocol_version = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
+        let initiator_token = u32::from_be_bytes(buffer[8..12].try_into().unwrap());
+        let sender_ssrc = u32::from_be_bytes(buffer[12..16].try_into().unwrap());
 
         let name = if buffer.len() > 16 {
             let name_bytes = &buffer[16..];
@@ -40,14 +36,6 @@ impl SessionInitiationPacket {
             sender_ssrc,
             name,
         })
-    }
-
-    fn has_valid_header(buffer: &[u8]) -> bool {
-        buffer.len() >= 4
-            && buffer[0] == 255
-            && buffer[1] == 255
-            && buffer[2] == b'I'
-            && buffer[3] == b'N'
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {

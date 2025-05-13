@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::clock_sync_packet::ClockSyncPacket;
-use crate::control_packet::ControlPacket;
 use crate::midi_command::MidiCommand;
-use crate::midi_packet::MidiPacket;
-use crate::session_initiation_packet::SessionInitiationPacket;
+use crate::packet::clock_sync_packet::ClockSyncPacket;
+use crate::packet::control_packet::ControlPacket;
+use crate::packet::packet::RtpMidiPacket;
+use crate::packet::session_initiation_packet::SessionInitiationPacket;
 
 pub struct RtpMidiServer {
     control_socket: UdpSocket,
@@ -49,12 +49,6 @@ impl RtpMidiServer {
             .insert(event_name, Box::new(callback));
     }
 
-    fn emit_event(&self, event_name: &str, data: MidiCommand) {
-        if let Some(listener) = self.listeners.lock().unwrap().get(event_name) {
-            listener(data);
-        }
-    }
-
     pub fn start(&self) -> std::io::Result<()> {
         println!(
             "RTP MIDI server started on control port {} and MIDI port {}",
@@ -91,33 +85,30 @@ impl RtpMidiServer {
             match socket.recv_from(&mut buf) {
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
-                    match ControlPacket::parse_header(&buf[..amt]) {
-                        Some(packet) => {
+                    match ControlPacket::parse(&buf[..amt]) {
+                        Ok(packet) => {
                             trace!("Control: Parsed packet: {:?}", packet);
-                            if packet.command.as_deref() == Some("IN") {
-                                info!("Control: Received invitation from {}", src);
-                                let invitation_packet =
-                                    SessionInitiationPacket::parse(&buf[..amt]).unwrap();
-                                trace!(
-                                    "Control: Parsed invitation packet: {:?}",
-                                    invitation_packet
-                                );
-                                Self::send_invitation_response(
-                                    &socket,
-                                    src,
-                                    ssrc,
-                                    invitation_packet.initiator_token,
-                                    &name,
-                                );
-                            } else if packet.command.as_deref() == Some("BY") {
-                                trace!("Control: Received end session command from {}", src);
-                                Self::handle_end_session(src);
-                            } else {
-                                warn!("Control: Unhandled command {:?} from {}", packet, src);
+                            match packet {
+                                ControlPacket::ClockSync(clock_sync_packet) => {
+                                    Self::handle_clock_sync(&socket, clock_sync_packet, src, ssrc);
+                                }
+                                ControlPacket::SessionInitiation(session_initiation_packet) => {
+                                    info!("Control: Received session initiation from {}", src);
+                                    Self::send_invitation_response(
+                                        &socket,
+                                        src,
+                                        ssrc,
+                                        session_initiation_packet.initiator_token,
+                                        &name,
+                                    );
+                                }
+                                ControlPacket::EndSession => {
+                                    Self::handle_end_session(src);
+                                }
                             }
                         }
-                        None => {
-                            warn!("Control: No valid packet found in data from {}", src);
+                        Err(e) => {
+                            warn!("Control: {} from {}", e, src);
                         }
                     }
                 }
@@ -134,68 +125,61 @@ impl RtpMidiServer {
 
     fn listen_for_midi(
         socket: UdpSocket,
-        name: String,
+        server_name: String,
         ssrc: u32,
         listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiCommand) + Send>>>>,
     ) {
-        let mut buf = [0; 1024];
+        let mut buf = [0; 65535];
         loop {
             match socket.recv_from(&mut buf) {
                 Ok((amt, src)) => {
                     trace!("MIDI: Received {} bytes from {}", amt, src);
-                    match ControlPacket::parse_header(&buf[..amt]) {
-                        Some(packet) => {
-                            trace!("MIDI: Parsed control packet: {:?}", packet);
-                            if packet.command.as_deref() == Some("IN") {
-                                info!("MIDI: Received invitation from {}", src);
-                                let invitation_packet =
-                                    SessionInitiationPacket::parse(&buf[..amt]).unwrap();
-                                trace!("MIDI: Parsed invitation packet: {:?}", invitation_packet);
-                                Self::send_invitation_response(
-                                    &socket,
-                                    src,
-                                    ssrc,
-                                    invitation_packet.initiator_token,
-                                    &name,
-                                );
-                            } else if packet.command.as_deref() == Some("CK") {
-                                debug!("MIDI: Received clock sync command from {}", src);
-                                let clock_sync_packet = ClockSyncPacket::parse(&buf[..amt]);
-                                if let Err(e) = clock_sync_packet {
-                                    eprintln!(
-                                        "MIDI: Failed to parse clock sync packet from {}: {}",
-                                        src, e
-                                    );
-                                    continue;
+                    match RtpMidiPacket::parse(&buf[..amt]) {
+                        Ok(packet) => {
+                            trace!("MIDI: Parsed RTP MIDI packet: {:?}", packet);
+                            match packet {
+                                RtpMidiPacket::Control(control_packet) => match control_packet {
+                                    ControlPacket::SessionInitiation(session_initiation_packet) => {
+                                        info!("MIDI: Received session initiation from {}", src);
+                                        Self::send_invitation_response(
+                                            &socket,
+                                            src,
+                                            ssrc,
+                                            session_initiation_packet.initiator_token,
+                                            &server_name,
+                                        );
+                                    }
+                                    ControlPacket::ClockSync(clock_sync_packet) => {
+                                        info!("MIDI: Received clock sync from {}", src);
+                                        Self::handle_clock_sync(
+                                            &socket,
+                                            clock_sync_packet,
+                                            src,
+                                            ssrc,
+                                        );
+                                    }
+                                    _ => {
+                                        warn!(
+                                            "MIDI: Unhandled control packet: {:?}",
+                                            control_packet
+                                        );
+                                    }
+                                },
+                                RtpMidiPacket::Midi(midi_packet) => {
+                                    debug!("MIDI: Parsed MIDI packet: {:?}", midi_packet);
+                                    for command in midi_packet.commands {
+                                        listeners
+                                            .lock()
+                                            .unwrap()
+                                            .get("midi_packet")
+                                            .map(|callback| callback(command));
+                                    }
                                 }
-                                let clock_sync_packet = clock_sync_packet.unwrap();
-                                trace!("MIDI: Parsed clock sync packet: {:?}", clock_sync_packet);
-                                Self::handle_clock_sync(&socket, clock_sync_packet, src, ssrc);
-                            } else {
-                                warn!(
-                                    "MIDI: Unhandled control command {:?} from {}",
-                                    packet.command, src
-                                );
                             }
                         }
-                        None => match MidiPacket::parse(&buf[..amt]) {
-                            Some(midi_packet) => {
-                                debug!("MIDI: Parsed MIDI packet: {:?}", midi_packet);
-                                for (time_delta, command) in midi_packet.commands {
-                                    std::thread::sleep(Duration::from_micros(
-                                        (time_delta * 100) as u64,
-                                    ));
-                                    listeners
-                                        .lock()
-                                        .unwrap()
-                                        .get("midi_packet")
-                                        .map(|callback| callback(command));
-                                }
-                            }
-                            None => {
-                                error!("MIDI: No valid packet found in data from {}", src);
-                            }
-                        },
+                        Err(e) => {
+                            error!("MIDI: Failed to parse RTP MIDI packet: {}", e);
+                        }
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -234,7 +218,7 @@ impl RtpMidiServer {
                 e
             );
         } else {
-            trace!(
+            info!(
                 "{}: Sent invitation response to {}",
                 socket.local_addr().unwrap().port(),
                 src
@@ -258,7 +242,7 @@ impl RtpMidiServer {
                 let timestamp2 = Self::current_timestamp();
                 let response_packet = ClockSyncPacket {
                     count: 1,
-                    timestamps: [packet.timestamps[0], Some(timestamp2), None],
+                    timestamps: vec![packet.timestamps[0], timestamp2, 0],
                     sender_ssrc: ssrc,
                 };
 
@@ -267,7 +251,7 @@ impl RtpMidiServer {
                 if let Err(e) = socket.send_to(&response_bytes, src) {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
                 } else {
-                    trace!("MIDI: Sent clock sync response to {}", src);
+                    info!("MIDI: Sent clock sync response to {}", src);
                 }
             }
             2 => {
@@ -275,7 +259,7 @@ impl RtpMidiServer {
                 debug!("MIDI: Clock sync finalized with {}", src);
             }
             _ => {
-                eprintln!(
+                error!(
                     "MIDI: Unexpected clock sync count {} from {}",
                     packet.count, src
                 );

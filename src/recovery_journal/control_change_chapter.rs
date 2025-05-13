@@ -1,8 +1,5 @@
-use super::recovery_journal::Chapter;
-
 #[derive(Debug, PartialEq)]
 pub struct ControlChangeChapter {
-    pub len: u8,
     pub entries: Vec<ControlChangeEntry>,
 }
 
@@ -20,12 +17,8 @@ pub enum ControlChangeChapterValueType {
     Count,
 }
 
-impl Chapter for ControlChangeChapter {
-    fn parse(data: &[u8]) -> Option<(Self, usize)> {
-        if data.is_empty() {
-            return None;
-        }
-
+impl ControlChangeChapter {
+    pub fn parse(data: &[u8]) -> Result<(Self, usize), String> {
         let mut entries = Vec::new();
         let mut index = 0;
 
@@ -58,12 +51,6 @@ impl Chapter for ControlChangeChapter {
             index += 3;
         }
 
-        Some((
-            ControlChangeChapter {
-                len: data[0],
-                entries,
-            },
-            length,
-        ))
+        Ok((ControlChangeChapter { entries }, length))
     }
 }

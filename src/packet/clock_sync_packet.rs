@@ -2,7 +2,7 @@ use std::fmt;
 
 pub struct ClockSyncPacket {
     pub count: u8,
-    pub timestamps: [Option<u64>; 3],
+    pub timestamps: Vec<u64>,
     pub sender_ssrc: u32,
 }
 
@@ -16,32 +16,23 @@ impl ClockSyncPacket {
             return Err("Invalid header: does not start with 0xFFFF".to_string());
         }
 
-        let sender_ssrc = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]);
+        let sender_ssrc = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
         let count = buffer[8];
 
-        let timestamps = [
-            if buffer.len() >= 16 {
-                Some(u64::from_be_bytes([
-                    0, 0, 0, 0, buffer[12], buffer[13], buffer[14], buffer[15],
-                ]))
-            } else {
-                None
-            },
-            if buffer.len() >= 20 {
-                Some(u64::from_be_bytes([
-                    0, 0, 0, 0, buffer[16], buffer[17], buffer[18], buffer[19],
-                ]))
-            } else {
-                None
-            },
-            if buffer.len() >= 24 {
-                Some(u64::from_be_bytes([
-                    0, 0, 0, 0, buffer[20], buffer[21], buffer[22], buffer[23],
-                ]))
-            } else {
-                None
-            },
-        ];
+        let mut timestamps = Vec::new();
+
+        for i in (8..buffer.len()).step_by(4) {
+            timestamps.push(u64::from_be_bytes([
+                0,
+                0,
+                0,
+                0,
+                buffer[i],
+                buffer[i + 1],
+                buffer[i + 2],
+                buffer[i + 3],
+            ]));
+        }
 
         Ok(ClockSyncPacket {
             count,
@@ -58,12 +49,12 @@ impl ClockSyncPacket {
             && buffer[3] == b'K'
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
 
         // Add the header
-        buffer.push(0xFF);
-        buffer.push(0xFF);
+        buffer.push(255);
+        buffer.push(255);
         buffer.push(b'C');
         buffer.push(b'K');
 
@@ -73,14 +64,9 @@ impl ClockSyncPacket {
         // Add the count
         buffer.push(self.count);
 
-        // Add unused bytes (3 bytes set to 0)
-        buffer.extend_from_slice(&[0, 0, 0]);
-
         // Add the timestamps
-        for &timestamp in &self.timestamps {
-            if let Some(ts) = timestamp {
-                buffer.extend_from_slice(&ts.to_be_bytes());
-            }
+        for timestamp in &self.timestamps {
+            buffer.extend_from_slice(&timestamp.to_be_bytes()[4..]);
         }
 
         buffer
