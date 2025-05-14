@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    io::{Error, ErrorKind},
+};
 
 pub struct ClockSyncPacket {
     pub count: u8,
@@ -7,13 +10,19 @@ pub struct ClockSyncPacket {
 }
 
 impl ClockSyncPacket {
-    pub fn parse(buffer: &[u8]) -> Result<Self, String> {
+    pub fn parse(buffer: &[u8]) -> Result<Self, Error> {
         if buffer.len() < 12 {
-            return Err("Buffer too short to be a valid clock sync packet".to_string());
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Buffer too short to be a valid clock sync packet",
+            ));
         }
 
         if !Self::has_valid_header(buffer) {
-            return Err("Invalid header: does not start with 0xFFFF".to_string());
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Header is not valid for a clock sync packet",
+            ));
         }
 
         let sender_ssrc = u32::from_be_bytes(buffer[4..8].try_into().unwrap());

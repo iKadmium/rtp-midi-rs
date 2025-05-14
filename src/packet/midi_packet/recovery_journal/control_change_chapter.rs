@@ -1,3 +1,5 @@
+use bitstream_io::FromBitStream;
+
 #[derive(Debug, PartialEq)]
 pub struct ControlChangeChapter {
     pub entries: Vec<ControlChangeEntry>,
@@ -17,19 +19,19 @@ pub enum ControlChangeChapterValueType {
     Count,
 }
 
-impl ControlChangeChapter {
-    pub fn parse(data: &[u8]) -> Result<(Self, usize), String> {
+impl FromBitStream for ControlChangeChapter {
+    type Error = std::io::Error;
+
+    fn from_reader<R: bitstream_io::BitRead + ?Sized>(reader: &mut R) -> Result<Self, Self::Error> {
+        let length = reader.read::<8, u8>()?;
         let mut entries = Vec::new();
-        let mut index = 0;
 
-        let length = data[0] as usize;
-
-        while index + 2 < data.len() {
-            let number = data[index + 1] & 0b0111_1111;
-            let a_flag = (data[index + 1] & 0b1000_0000) != 0;
+        for _ in 0..length {
+            let number = reader.read::<7, u8>()?;
+            let a_flag = reader.read_bit()?;
             let (value, value_type) = if a_flag {
-                let toggle = data[index + 2] & 0b0100_0000 == 0;
-                let value = data[index + 2] & 0b0011_1111;
+                let toggle = reader.read_bit()?;
+                let value = reader.read::<6, u8>()?;
                 let value_type = if toggle {
                     ControlChangeChapterValueType::Toggle
                 } else {
@@ -38,7 +40,7 @@ impl ControlChangeChapter {
                 (value, value_type)
             } else {
                 (
-                    data[index + 2] & 0b0111_1111,
+                    reader.read::<7, u8>()?,
                     ControlChangeChapterValueType::Value,
                 )
             };
@@ -48,9 +50,8 @@ impl ControlChangeChapter {
                 value,
                 value_type,
             });
-            index += 3;
         }
 
-        Ok((ControlChangeChapter { entries }, length))
+        Ok(ControlChangeChapter { entries })
     }
 }

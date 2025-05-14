@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::midi_command::MidiCommand;
 use crate::packet::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packet::ControlPacket;
+use crate::packet::midi_packet::midi_command::MidiCommand;
 use crate::packet::packet::RtpMidiPacket;
 use crate::packet::session_initiation_packet::SessionInitiationPacket;
 
@@ -140,7 +140,7 @@ impl RtpMidiServer {
                             match packet {
                                 RtpMidiPacket::Control(control_packet) => match control_packet {
                                     ControlPacket::SessionInitiation(session_initiation_packet) => {
-                                        info!("MIDI: Received session initiation from {}", src);
+                                        debug!("MIDI: Received session initiation from {}", src);
                                         Self::send_invitation_response(
                                             &socket,
                                             src,
@@ -150,7 +150,7 @@ impl RtpMidiServer {
                                         );
                                     }
                                     ControlPacket::ClockSync(clock_sync_packet) => {
-                                        info!("MIDI: Received clock sync from {}", src);
+                                        debug!("MIDI: Received clock sync from {}", src);
                                         Self::handle_clock_sync(
                                             &socket,
                                             clock_sync_packet,
@@ -251,12 +251,12 @@ impl RtpMidiServer {
                 if let Err(e) = socket.send_to(&response_bytes, src) {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
                 } else {
-                    info!("MIDI: Sent clock sync response to {}", src);
+                    debug!("MIDI: Sent clock sync response to {}", src);
                 }
             }
             2 => {
                 // Finalize clock sync
-                debug!("MIDI: Clock sync finalized with {}", src);
+                info!("MIDI: Clock sync finalized with {}", src);
             }
             _ => {
                 error!(

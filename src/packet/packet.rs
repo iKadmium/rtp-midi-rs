@@ -1,4 +1,4 @@
-use super::{control_packet::ControlPacket, midi_packet::MidiPacket};
+use super::{control_packet::ControlPacket, midi_packet::midi_packet::MidiPacket};
 
 #[derive(Debug)]
 pub enum RtpMidiPacket {
@@ -7,9 +7,12 @@ pub enum RtpMidiPacket {
 }
 
 impl RtpMidiPacket {
-    pub fn parse(bytes: &[u8]) -> Result<Self, String> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, std::io::Error> {
         if bytes.is_empty() {
-            return Err("Input bytes are empty".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Input data was empty",
+            ));
         }
 
         if ControlPacket::is_control_packet(bytes) {

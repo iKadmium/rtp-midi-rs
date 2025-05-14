@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    io::{Error, ErrorKind},
+};
 
 pub struct SessionInitiationPacket {
     pub command: [u8; 2],
@@ -9,12 +12,15 @@ pub struct SessionInitiationPacket {
 }
 
 impl SessionInitiationPacket {
-    pub fn parse(buffer: &[u8]) -> Result<Self, String> {
+    pub fn parse(buffer: &[u8]) -> Result<Self, Error> {
         if buffer.len() < 16 {
-            return Err("Buffer too short to be a valid session initiation packet".to_string());
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Buffer too short to be a valid session initiation packet",
+            ));
         }
 
-        let command = [buffer[2], buffer[3]];
+        let command = buffer[2..4].try_into().unwrap();
         let protocol_version = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
         let initiator_token = u32::from_be_bytes(buffer[8..12].try_into().unwrap());
         let sender_ssrc = u32::from_be_bytes(buffer[12..16].try_into().unwrap());

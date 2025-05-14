@@ -1,3 +1,5 @@
+use std::io::{Error, ErrorKind};
+
 use super::{
     clock_sync_packet::ClockSyncPacket, session_initiation_packet::SessionInitiationPacket,
 };
@@ -10,11 +12,14 @@ pub enum ControlPacket {
 }
 
 impl ControlPacket {
-    pub fn parse(buffer: &[u8]) -> Result<Self, String> {
+    pub fn parse(buffer: &[u8]) -> Result<Self, std::io::Error> {
         let command = if buffer.len() > 2 && buffer[0] == 255 && buffer[1] == 255 {
             String::from_utf8_lossy(&buffer[2..4]).to_string()
         } else {
-            return Err("Invalid control packet header".to_string())?;
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Invalid control packet header",
+            ));
         };
         match command.as_str() {
             "CK" => {
@@ -28,7 +33,10 @@ impl ControlPacket {
             "BY" => {
                 return Ok(ControlPacket::EndSession);
             }
-            _ => Err(format!("Unknown control packet command: {}", command)),
+            _ => Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("Unknown control packet, {}", command),
+            ))?,
         }
     }
 
