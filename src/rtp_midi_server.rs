@@ -1,97 +1,83 @@
 use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
-use std::net::UdpSocket;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::sync::Arc;
 
 use crate::packet::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packet::ControlPacket;
-use crate::packet::midi_packet::midi_command::MidiCommand;
+use crate::packet::midi_packet::midi_packet::MidiPacket;
 use crate::packet::packet::RtpMidiPacket;
 use crate::packet::session_initiation_packet::SessionInitiationPacket;
+use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
+use tokio::task;
 
 pub struct RtpMidiServer {
-    control_socket: UdpSocket,
-    midi_socket: UdpSocket,
     name: String,
     ssrc: u32,
-    listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiCommand) + Send>>>>,
+    listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
 }
 
 impl RtpMidiServer {
-    pub fn new(
-        control_port: u16,
-        midi_port: u16,
-        name: String,
-        ssrc: u32,
-    ) -> std::io::Result<Self> {
-        let control_socket = UdpSocket::bind(("0.0.0.0", control_port))?;
-        let midi_socket = UdpSocket::bind(("0.0.0.0", midi_port))?;
-        control_socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-        midi_socket.set_read_timeout(Some(Duration::from_secs(1)))?;
-        Ok(Self {
-            control_socket,
-            midi_socket,
+    pub fn new(name: String, ssrc: u32) -> Self {
+        Self {
             name,
             ssrc,
             listeners: Arc::new(Mutex::new(HashMap::new())),
-        })
+        }
     }
 
-    pub fn add_listener<F>(&self, event_name: String, callback: F)
+    pub async fn add_listener<F>(&self, event_name: String, callback: F)
     where
-        F: Fn(MidiCommand) + Send + 'static,
+        F: Fn(MidiPacket) + Send + 'static,
     {
-        self.listeners
-            .lock()
-            .unwrap()
-            .insert(event_name, Box::new(callback));
+        let mut listeners = self.listeners.lock().await;
+        listeners.insert(event_name, Box::new(callback));
     }
 
-    pub fn start(&self) -> std::io::Result<()> {
-        println!(
+    pub async fn start(&self, port: u16) -> std::io::Result<()> {
+        let midi_port = port + 1;
+        info!(
             "RTP MIDI server started on control port {} and MIDI port {}",
-            self.control_socket.local_addr()?.port(),
-            self.midi_socket.local_addr()?.port()
+            port, midi_port
         );
 
-        let control_socket = self.control_socket.try_clone()?;
-        let midi_socket = self.midi_socket.try_clone()?;
-
-        let server_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
 
-        let control_thread = thread::spawn({
-            let server_name = server_name.clone();
-            let ssrc = self.ssrc;
-            move || Self::listen_for_control(control_socket, server_name, ssrc)
-        });
-        let midi_thread = thread::spawn({
-            let server_name = server_name.clone();
-            let ssrc = self.ssrc;
-            move || Self::listen_for_midi(midi_socket, server_name, ssrc, listeners_midi)
-        });
+        let control_task =
+            task::spawn(Self::listen_for_control(port, self.name.clone(), self.ssrc));
 
-        control_thread.join().unwrap();
-        midi_thread.join().unwrap();
+        let midi_task = task::spawn(Self::listen_for_midi(
+            midi_port,
+            self.name.clone(),
+            self.ssrc,
+            listeners_midi,
+        ));
+
+        tokio::select! {
+            _ = control_task => {
+                debug!("Control task completed");
+            },
+            _ = midi_task => {
+                debug!("MIDI task completed");
+            },
+        }
 
         Ok(())
     }
 
-    fn listen_for_control(socket: UdpSocket, name: String, ssrc: u32) {
-        let mut buf = [0; 1024];
+    async fn listen_for_control(control_port: u16, name: String, ssrc: u32) {
+        let socket = Arc::new(UdpSocket::bind(("0.0.0.0", control_port)).await.unwrap());
+        socket.set_broadcast(true).unwrap();
+
+        let mut buf = [0; 65535];
         loop {
-            match socket.recv_from(&mut buf) {
+            match socket.recv_from(&mut buf).await {
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
                     match ControlPacket::parse(&buf[..amt]) {
                         Ok(packet) => {
                             trace!("Control: Parsed packet: {:?}", packet);
                             match packet {
-                                ControlPacket::ClockSync(clock_sync_packet) => {
-                                    Self::handle_clock_sync(&socket, clock_sync_packet, src, ssrc);
-                                }
                                 ControlPacket::SessionInitiation(session_initiation_packet) => {
                                     info!("Control: Received session initiation from {}", src);
                                     Self::send_invitation_response(
@@ -100,10 +86,15 @@ impl RtpMidiServer {
                                         ssrc,
                                         session_initiation_packet.initiator_token,
                                         &name,
-                                    );
+                                    )
+                                    .await;
                                 }
                                 ControlPacket::EndSession => {
                                     Self::handle_end_session(src);
+                                    break;
+                                }
+                                _ => {
+                                    warn!("Control: Unhandled control packet: {:?}", packet);
                                 }
                             }
                         }
@@ -111,9 +102,6 @@ impl RtpMidiServer {
                             warn!("Control: {} from {}", e, src);
                         }
                     }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
                 }
                 Err(e) => {
                     error!("Control: Error receiving data: {}", e);
@@ -123,15 +111,18 @@ impl RtpMidiServer {
         }
     }
 
-    fn listen_for_midi(
-        socket: UdpSocket,
+    async fn listen_for_midi(
+        midi_port: u16,
         server_name: String,
         ssrc: u32,
-        listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiCommand) + Send>>>>,
+        listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
     ) {
+        let socket = Arc::new(UdpSocket::bind(("0.0.0.0", midi_port)).await.unwrap());
+        socket.set_broadcast(true).unwrap();
+
         let mut buf = [0; 65535];
         loop {
-            match socket.recv_from(&mut buf) {
+            match socket.recv_from(&mut buf).await {
                 Ok((amt, src)) => {
                     trace!("MIDI: Received {} bytes from {}", amt, src);
                     match RtpMidiPacket::parse(&buf[..amt]) {
@@ -147,7 +138,8 @@ impl RtpMidiServer {
                                             ssrc,
                                             session_initiation_packet.initiator_token,
                                             &server_name,
-                                        );
+                                        )
+                                        .await;
                                     }
                                     ControlPacket::ClockSync(clock_sync_packet) => {
                                         debug!("MIDI: Received clock sync from {}", src);
@@ -156,23 +148,22 @@ impl RtpMidiServer {
                                             clock_sync_packet,
                                             src,
                                             ssrc,
-                                        );
+                                        )
+                                        .await;
                                     }
                                     _ => {
-                                        warn!(
-                                            "MIDI: Unhandled control packet: {:?}",
+                                        debug!(
+                                            "MIDI: Received control packet: {:?}",
                                             control_packet
                                         );
                                     }
                                 },
                                 RtpMidiPacket::Midi(midi_packet) => {
                                     debug!("MIDI: Parsed MIDI packet: {:?}", midi_packet);
-                                    for command in midi_packet.commands {
-                                        listeners
-                                            .lock()
-                                            .unwrap()
-                                            .get("midi_packet")
-                                            .map(|callback| callback(command));
+                                    if let Some(callback) =
+                                        listeners.lock().await.get("midi_packet")
+                                    {
+                                        callback(midi_packet);
                                     }
                                 }
                             }
@@ -182,9 +173,6 @@ impl RtpMidiServer {
                         }
                     }
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
                 Err(e) => {
                     error!("MIDI: Error receiving data: {}", e);
                     break;
@@ -193,7 +181,7 @@ impl RtpMidiServer {
         }
     }
 
-    fn send_invitation_response(
+    async fn send_invitation_response(
         socket: &UdpSocket,
         src: std::net::SocketAddr,
         sender_ssrc: u32,
@@ -210,7 +198,7 @@ impl RtpMidiServer {
 
         let response_bytes = response_packet.to_bytes();
 
-        if let Err(e) = socket.send_to(&response_bytes, src) {
+        if let Err(e) = socket.send_to(&response_bytes, src).await {
             error!(
                 "{}: Failed to send invitation response to {}: {}",
                 socket.local_addr().unwrap().port(),
@@ -230,7 +218,7 @@ impl RtpMidiServer {
         info!("Control: Ending session with {}", src);
     }
 
-    fn handle_clock_sync(
+    async fn handle_clock_sync(
         socket: &UdpSocket,
         packet: ClockSyncPacket,
         src: std::net::SocketAddr,
@@ -248,7 +236,7 @@ impl RtpMidiServer {
 
                 let response_bytes = response_packet.to_bytes();
 
-                if let Err(e) = socket.send_to(&response_bytes, src) {
+                if let Err(e) = socket.send_to(&response_bytes, src).await {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
                 } else {
                     debug!("MIDI: Sent clock sync response to {}", src);

@@ -2,19 +2,28 @@ mod packet;
 mod rtp_midi_server;
 
 use log::info;
+use packet::midi_packet::midi_packet::MidiPacket;
 use rtp_midi_server::RtpMidiServer;
+use tokio; // Add tokio runtime for async main
 
-fn main() {
+#[tokio::main]
+async fn main() {
     colog::default_builder()
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    let server = RtpMidiServer::new(5004, 5005, "RTPMidiServer".to_string(), 12345)
-        .expect("Failed to start RTP MIDI server");
+    let server = RtpMidiServer::new("RTPMidiServer".to_string(), 12345);
 
-    server.add_listener("midi_packet".to_string(), |data| {
-        info!("MIDI Packet Event: {:?}", data);
-    });
+    server
+        .add_listener("midi_packet".to_string(), handle_midi_packet)
+        .await;
 
-    server.start().expect("Error while running the server");
+    server
+        .start(5004)
+        .await
+        .expect("Error while running the server");
+}
+
+fn handle_midi_packet(data: MidiPacket) {
+    info!("Received MIDI packet: {:?}", data);
 }
