@@ -25,5 +25,7 @@ async fn main() {
 }
 
 fn handle_midi_packet(data: MidiPacket) {
-    info!("Received MIDI packet: {:?}", data);
+    for command in data.commands {
+        info!("Received command: {:?}", command);
+    }
 }

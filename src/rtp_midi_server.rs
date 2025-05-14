@@ -1,15 +1,16 @@
 use log::{debug, error, info, trace, warn};
+use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
+use tokio::task;
 
 use crate::packet::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packet::ControlPacket;
 use crate::packet::midi_packet::midi_packet::MidiPacket;
 use crate::packet::packet::RtpMidiPacket;
 use crate::packet::session_initiation_packet::SessionInitiationPacket;
-use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
-use tokio::task;
 
 pub struct RtpMidiServer {
     name: String,
@@ -34,24 +35,33 @@ impl RtpMidiServer {
         listeners.insert(event_name, Box::new(callback));
     }
 
-    pub async fn start(&self, port: u16) -> std::io::Result<()> {
-        let midi_port = port + 1;
-        info!(
-            "RTP MIDI server started on control port {} and MIDI port {}",
-            port, midi_port
-        );
+    pub async fn start(&self, control_port: u16) -> std::io::Result<()> {
+        let midi_port = control_port + 1;
 
+        // Advertise the service on mDNS
+        Self::advertise_service(&self.name.clone(), midi_port)
+            .expect("Failed to advertise service");
+
+        let server_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
 
-        let control_task =
-            task::spawn(Self::listen_for_control(port, self.name.clone(), self.ssrc));
+        let control_task = task::spawn(Self::listen_for_control(
+            control_port,
+            server_name.clone(),
+            self.ssrc,
+        ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
             midi_port,
-            self.name.clone(),
+            server_name,
             self.ssrc,
             listeners_midi,
         ));
+
+        println!(
+            "RTP MIDI server starting on control port {} and MIDI port {}",
+            control_port, midi_port
+        );
 
         tokio::select! {
             _ = control_task => {
@@ -61,6 +71,28 @@ impl RtpMidiServer {
                 debug!("MIDI task completed");
             },
         }
+
+        Ok(())
+    }
+
+    fn advertise_service(instance_name: &str, port: u16) -> Result<(), mdns_sd::Error> {
+        let mdns = ServiceDaemon::new()?;
+        let service_type = "_apple-midi._udp.local.";
+        let ip = local_ip_address::local_ip()
+            .expect("Failed to get local IP address")
+            .to_string();
+
+        let raw_hostname = hostname::get()
+            .expect("Failed to get hostname")
+            .to_string_lossy()
+            .to_string();
+        let hostname = format!("{}.local.", raw_hostname);
+        let props = [("apple-midi", "RTP-MIDI")];
+        let service =
+            ServiceInfo::new(service_type, instance_name, &hostname, ip, port, &props[..])?;
+        mdns.register(service)?;
+
+        //sleep(Duration::from_secs(60));
 
         Ok(())
     }
@@ -91,7 +123,6 @@ impl RtpMidiServer {
                                 }
                                 ControlPacket::EndSession => {
                                     Self::handle_end_session(src);
-                                    break;
                                 }
                                 _ => {
                                     warn!("Control: Unhandled control packet: {:?}", packet);

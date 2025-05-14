@@ -15,13 +15,11 @@
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [
-	// 	"5004:5004/udp",
-	// 	"5005:5005/udp"
-	// ],
+	// "forwardPorts": [],
 	"runArgs": [
 		"-p=5004:5004/udp",
 		"-p=5005:5005/udp"
+		// "--network=host"
 	]
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "rustc --version",
