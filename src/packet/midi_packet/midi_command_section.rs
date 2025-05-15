@@ -1,98 +1,129 @@
-use bitstream_io::{BitRead, BitWrite, FromBitStream, ToBitStream};
 use log::trace;
 
-use crate::packet::midi_packet::midi_command::CommandType;
-
-use super::midi_command::MidiCommand;
+use super::midi_timed_command::TimedCommand;
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct MidiCommandSection {
-    pub phantom_flag: bool,
-    pub has_journal: bool,
-    pub commands: Vec<MidiCommand>,
+    flags: u8,
+    commands: Vec<TimedCommand>,
 }
 
-impl FromBitStream for MidiCommandSection {
-    type Error = std::io::Error;
-
-    fn from_reader<R: BitRead + ?Sized>(reader: &mut R) -> Result<Self, Self::Error> {
-        let b_flag = reader.read_bit()?;
-        let j_flag = reader.read_bit()?;
-        let z_flag = reader.read_bit()?;
-        let p_flag = reader.read_bit()?;
-        let length = if b_flag {
-            reader.read::<12, u16>()?
-        } else {
-            reader.read::<4, u16>()?
-        };
-
-        let mut commands = Vec::new();
-        trace!("About to read {} bytes", length);
-
-        let mut running_status: Option<CommandType> = None;
-        let mut running_channel: Option<u8> = None;
-
-        let mut bytes_read: u16 = 0;
-
-        while bytes_read < length {
-            let has_delta_time = !commands.is_empty() || z_flag;
-            let (command, length) =
-                MidiCommand::read_command(reader, has_delta_time, running_status, running_channel)?;
-            bytes_read += length as u16;
-            running_channel = Some(command.channel);
-            running_status = Some(command.command);
-            commands.push(command);
+impl MidiCommandSection {
+    pub fn new() -> Self {
+        MidiCommandSection {
+            flags: 0,
+            commands: Vec::new(),
         }
-
-        Ok(MidiCommandSection {
-            phantom_flag: p_flag,
-            has_journal: j_flag,
-            commands,
-        })
     }
-}
 
-impl ToBitStream for MidiCommandSection {
-    type Error = std::io::Error;
+    pub fn b_flag(&self) -> bool {
+        self.length() > 0x000F
+    }
 
-    fn to_writer<W: BitWrite + ?Sized>(&self, writer: &mut W) -> Result<(), Self::Error> {
-        let length = {
-            let mut total_length = 0;
+    pub fn j_flag(&self) -> bool {
+        self.flags & 0b0100_0000 != 0
+    }
 
-            for (index, command) in self.commands.iter().enumerate() {
-                total_length += command.size() as u16;
-                if index > 0 {
-                    match &command.delta_time {
-                        Some(delta_time) => total_length += delta_time.size() as u16,
-                        None => total_length += 1, // Zero-length delta time
+    pub fn z_flag(&self) -> bool {
+        self.flags & 0b0010_0000 != 0
+    }
+
+    pub fn p_flag(&self) -> bool {
+        self.flags & 0b0001_0000 != 0
+    }
+
+    pub fn length(&self) -> usize {
+        let mut length: usize = if self.b_flag() { 2 } else { 1 };
+        let mut running_status: Option<u8> = None;
+        for (i, command) in self.commands.iter().enumerate() {
+            if i > 0 || self.z_flag() {
+                match command.delta_time() {
+                    Some(ref delta_time) => length += delta_time.size(),
+                    None => {
+                        length += 1;
                     }
                 }
             }
-            total_length
-        };
-        let b_flag = length > 0xFFF;
-        writer.write_bit(b_flag)?;
-        writer.write_bit(self.has_journal)?;
-        writer.write_bit(false)?; // z_flag
-        writer.write_bit(self.phantom_flag)?; // p_flag
+            if Some(command.command().status) != running_status {
+                length += 1;
+            }
+            length += command.command().data.len();
+            running_status = Some(command.command().status);
+        }
+        return length;
+    }
 
-        if self.phantom_flag {
-            writer.write::<12, u16>(length)?;
+    pub fn commands(&self) -> &[TimedCommand] {
+        &self.commands
+    }
+
+    pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        trace!("Parsing MIDI command section from bytes, {:#?}", bytes);
+        let flags_and_length_lo = bytes[0];
+        let b_flag = flags_and_length_lo & 0b1000_0000 != 0;
+        let flags = flags_and_length_lo & 0b0111_0000;
+
+        let mut offset = 1;
+
+        let length = if b_flag {
+            let flags_and_length_hi = bytes[1];
+            let length = u16::from_be_bytes([flags_and_length_lo, flags_and_length_hi]) as usize;
+            offset += 1;
+            length
         } else {
-            writer.write::<4, u16>(length)?;
+            let length = (flags_and_length_lo & 0x0F) as usize;
+            length
+        };
+
+        let mut commands = Vec::new();
+
+        let mut running_status: Option<u8> = None;
+        let mut read_delta_time = (flags & 0b0010_0000) != 0;
+
+        while offset < length {
+            let (timed_command, bytes_read) =
+                TimedCommand::from_be_bytes(&bytes[offset..], running_status, read_delta_time)?;
+            read_delta_time = true;
+            running_status = Some(timed_command.command().status);
+            commands.push(timed_command);
+            offset += bytes_read;
         }
 
-        let mut running_status: Option<CommandType> = None;
-        let mut running_channel: Option<u8> = None;
+        Ok(MidiCommandSection { flags, commands })
+    }
 
-        for (i, command) in self.commands.iter().enumerate() {
-            let write_delta_time = i > 0;
-            command.to_writer(writer, running_status, running_channel, write_delta_time)?;
-            running_status = Some(command.command);
-            running_channel = Some(command.channel);
+    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<usize, std::io::Error> {
+        let total_length = self.length();
+        let mut offset: usize;
+        if total_length > 0x000F {
+            // If length > 0x0F, use 12 bits for length and 4 bits for flags
+            // Set the high bit to indicate extended length
+            let flags_and_length: u16 =
+                0x8000 | ((self.flags as u16) << 8) | ((total_length as u16) & 0x0FFF);
+            bytes[0..2].copy_from_slice(&flags_and_length.to_be_bytes());
+            offset = 2;
+        } else {
+            // Otherwise, use 4 bits for length and 4 bits for flags
+            let flags_and_length: u8 = (self.flags) | ((total_length as u8) & 0x000F);
+            bytes[0] = flags_and_length;
+            offset = 1;
         }
 
-        Ok(())
+        let command_start = offset;
+        let mut running_status: Option<u8> = None;
+        for command in &self.commands {
+            let write_delta_time = if offset == command_start {
+                self.z_flag()
+            } else {
+                true
+            };
+            let bytes_written =
+                command.write_to_bytes(&mut bytes[offset..], running_status, write_delta_time)?;
+            running_status = Some(command.command().status);
+            offset += bytes_written;
+        }
+
+        Ok(offset)
     }
 }

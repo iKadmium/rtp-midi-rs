@@ -18,7 +18,7 @@ impl RtpMidiPacket {
         if ControlPacket::is_control_packet(bytes) {
             return ControlPacket::parse(bytes).map(RtpMidiPacket::Control);
         } else {
-            return MidiPacket::parse(bytes).map(RtpMidiPacket::Midi);
+            return MidiPacket::from_be_bytes(bytes).map(RtpMidiPacket::Midi);
         }
     }
 }

@@ -39,8 +39,8 @@ impl RtpMidiServer {
         let midi_port = control_port + 1;
 
         // Advertise the service on mDNS
-        Self::advertise_service(&self.name.clone(), midi_port)
-            .expect("Failed to advertise service");
+        // Self::advertise_service(&self.name.clone(), midi_port)
+        //     .expect("Failed to advertise service");
 
         let server_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
@@ -190,7 +190,7 @@ impl RtpMidiServer {
                                     }
                                 },
                                 RtpMidiPacket::Midi(midi_packet) => {
-                                    debug!("MIDI: Parsed MIDI packet: {:?}", midi_packet);
+                                    debug!("MIDI: Parsed MIDI packet: {:#?}", midi_packet);
                                     if let Some(callback) =
                                         listeners.lock().await.get("midi_packet")
                                     {

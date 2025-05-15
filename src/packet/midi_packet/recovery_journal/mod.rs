@@ -1,3 +1,3 @@
-pub mod control_change_chapter;
-pub mod program_change_chapter;
+pub mod channel_journal;
 pub mod recovery_journal;
+pub mod system_journal;

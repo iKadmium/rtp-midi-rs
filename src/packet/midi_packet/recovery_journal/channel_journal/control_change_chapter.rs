@@ -1,5 +1,3 @@
-use bitstream_io::FromBitStream;
-
 #[derive(Debug, PartialEq)]
 pub struct ControlChangeChapter {
     pub entries: Vec<ControlChangeEntry>,
@@ -19,10 +17,8 @@ pub enum ControlChangeChapterValueType {
     Count,
 }
 
-impl FromBitStream for ControlChangeChapter {
-    type Error = std::io::Error;
-
-    fn from_reader<R: bitstream_io::BitRead + ?Sized>(reader: &mut R) -> Result<Self, Self::Error> {
+impl ControlChangeChapter {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
         let length = reader.read::<8, u8>()?;
         let mut entries = Vec::new();
 
