@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use bitstream_io::{BigEndian, BitRead, BitReader, FromBitStream};
+use bitstream_io::{BigEndian, BitRead, BitReader, BitWrite, FromBitStream, ToBitStream};
 use log::trace;
 
 use crate::packet::midi_packet::recovery_journal::recovery_journal::RecoveryJournal;
@@ -12,6 +12,7 @@ use super::{midi_command::MidiCommand, midi_command_section::MidiCommandSection}
 pub struct MidiPacket {
     pub sender_ssrc: u32,
     pub timestamp: u32,
+    pub sequence_number: u16,
     pub commands: Vec<MidiCommand>,
     pub recovery_journal: Option<RecoveryJournal>,
 }
@@ -29,11 +30,40 @@ impl MidiPacket {
         };
 
         Ok(Self {
+            sequence_number: header.sequence_number,
             sender_ssrc: header.ssrc,
             timestamp: header.timestamp,
             commands: command_section.commands,
             recovery_journal,
         })
+    }
+}
+
+impl ToBitStream for MidiPacket {
+    type Error = std::io::Error;
+
+    fn to_writer<W: BitWrite + ?Sized>(&self, writer: &mut W) -> Result<(), Self::Error> {
+        let header = MidiPacketHeader {
+            version: 2,
+            p_flag: false,
+            x_flag: false,
+            cc: 0,
+            m_flag: true,
+            pt: 0x61,
+            sequence_number: 0,
+            timestamp: self.timestamp,
+            ssrc: self.sender_ssrc,
+        };
+        header.to_writer(writer)?;
+
+        let command_section = MidiCommandSection {
+            phantom_flag: false,
+            has_journal: false,
+            commands: self.commands.clone(),
+        };
+        command_section.to_writer(writer)?;
+
+        Ok(())
     }
 }
 
@@ -76,5 +106,23 @@ impl FromBitStream for MidiPacketHeader {
             timestamp,
             ssrc,
         })
+    }
+}
+
+impl ToBitStream for MidiPacketHeader {
+    type Error = std::io::Error;
+
+    fn to_writer<W: BitWrite + ?Sized>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write::<2, _>(self.version)?;
+        writer.write_bit(self.p_flag)?;
+        writer.write_bit(self.x_flag)?;
+        writer.write::<4, _>(self.cc)?;
+        writer.write_bit(self.m_flag)?;
+        writer.write::<7, _>(self.pt)?;
+        writer.write::<16, _>(self.sequence_number)?;
+        writer.write::<32, _>(self.timestamp)?;
+        writer.write::<32, _>(self.ssrc)?;
+
+        Ok(())
     }
 }

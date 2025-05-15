@@ -6,13 +6,14 @@ use super::delta_time::DeltaTime;
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct MidiCommand {
-    pub delta_time: u32,
+    pub delta_time: Option<DeltaTime>,
     pub command: CommandType,
     pub channel: u8,
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 #[allow(dead_code)]
 pub enum CommandType {
     NoteOff,
@@ -52,9 +53,9 @@ impl MidiCommand {
         let delta_time = if has_delta_time {
             let (delta_time, length) = DeltaTime::from_reader(reader)?;
             bytes_read += length;
-            delta_time.time
+            Some(delta_time)
         } else {
-            0
+            None
         };
 
         let status_bit = reader.read_bit()?;
@@ -101,6 +102,41 @@ impl MidiCommand {
             },
             bytes_read,
         ))
+    }
+
+    pub fn size(&self) -> usize {
+        let mut size: usize = 1;
+        size += self.command.size();
+        size
+    }
+
+    pub(crate) fn to_writer<W: bitstream_io::BitWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+        running_status: Option<CommandType>,
+        running_channel: Option<u8>,
+        write_delta_time: bool,
+    ) -> std::io::Result<()> {
+        if write_delta_time {
+            if let Some(delta_time) = &self.delta_time {
+                delta_time.to_writer(writer)?;
+            } else {
+                writer.write::<8, _>(DeltaTime::ZERO)?;
+            }
+        }
+
+        let status_bit =
+            Some(self.command) != running_status || Some(self.channel) != running_channel;
+
+        if status_bit {
+            writer.write_bit(true)?;
+            writer.write::<3, _>(self.command as u8 >> 4)?;
+            writer.write::<4, _>(self.channel)?;
+        }
+
+        writer.write_bytes(&self.data)?;
+
+        Ok(())
     }
 }
 

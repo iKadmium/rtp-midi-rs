@@ -2,9 +2,10 @@ use bitstream_io::FromBitStream;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeltaTime {
-    pub time: u32,
+    chunks: Vec<DeltaTimeChunk>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 struct DeltaTimeChunk {
     continuation: bool,
     time: u8,
@@ -24,8 +25,35 @@ impl FromBitStream for DeltaTimeChunk {
 }
 
 impl DeltaTime {
+    pub const ZERO: u8 = 0b1000_0000;
+
     pub fn new(delta_time: u32) -> Self {
-        DeltaTime { time: delta_time }
+        let mut chunks = Vec::new();
+        let mut remaining_time = delta_time;
+
+        while remaining_time > 0 {
+            let time = (remaining_time & 0x7F) as u8;
+            let continuation = remaining_time > 0x7F;
+            chunks.push(DeltaTimeChunk { continuation, time });
+            remaining_time >>= 7;
+        }
+
+        DeltaTime { chunks }
+    }
+
+    pub fn size(&self) -> usize {
+        return self.chunks.len();
+    }
+
+    pub fn to_writer<W: bitstream_io::BitWrite + ?Sized>(
+        &self,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        for chunk in &self.chunks {
+            writer.write_bit(chunk.continuation)?;
+            writer.write::<7, _>(chunk.time)?;
+        }
+        Ok(())
     }
 }
 
