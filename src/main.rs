@@ -49,10 +49,12 @@ async fn main() {
                     })
                     .collect();
 
-                match server.send_midi(&commands).await {
-                    Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
-                    Err(e) => info!("Error sending MIDI packet: {:?}", e),
-                };
+                if !commands.is_empty() {
+                    match server.send_midi(&commands).await {
+                        Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
+                        Err(e) => info!("Error sending MIDI packet: {:?}", e),
+                    };
+                }
             });
         })
         .await;
