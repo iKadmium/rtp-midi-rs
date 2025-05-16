@@ -9,6 +9,13 @@ pub struct TimedCommand {
 }
 
 impl TimedCommand {
+    pub fn new(delta_time: Option<DeltaTime>, command: MidiCommand) -> Self {
+        TimedCommand {
+            delta_time,
+            command,
+        }
+    }
+
     pub fn delta_time(&self) -> Option<&DeltaTime> {
         self.delta_time.as_ref()
     }
@@ -70,14 +77,16 @@ impl TimedCommand {
 
 #[cfg(test)]
 mod tests {
-    use crate::packet::midi_packet::midi_command::CommandType;
-
     use super::*;
 
     #[test]
     fn test_timed_command() {
         let delta_time = DeltaTime::new(0x123456);
-        let command = MidiCommand::new(CommandType::NoteOn, 7, vec![0x40, 0x7F]);
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
         let timed_command = TimedCommand {
             delta_time: Some(delta_time.clone()),
             command: command.clone(),
@@ -123,7 +132,11 @@ mod tests {
 
         let delta_time = DeltaTime::new(0x123456);
         expected_bytes_written += delta_time.write_to_bytes(&mut expected_bytes).unwrap();
-        let command = MidiCommand::new(CommandType::NoteOn, 7, vec![0x40, 0x7F]);
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
         expected_bytes_written += command
             .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
             .unwrap();
@@ -147,7 +160,11 @@ mod tests {
         let mut expected_bytes = vec![0; 10];
         let mut expected_bytes_written = 0;
 
-        let command = MidiCommand::new(CommandType::NoteOn, 7, vec![0x40, 0x7F]);
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
         expected_bytes_written += command
             .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
             .unwrap();
@@ -174,7 +191,11 @@ mod tests {
         let delta_time = DeltaTime::zero();
         expected_bytes_written += delta_time.write_to_bytes(&mut expected_bytes).unwrap();
 
-        let command = MidiCommand::new(CommandType::NoteOn, 7, vec![0x40, 0x7F]);
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
         expected_bytes_written += command
             .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
             .unwrap();
@@ -196,7 +217,11 @@ mod tests {
     #[test]
     fn test_timed_command_serialize_and_deserialize() {
         let delta_time = DeltaTime::new(0x123456);
-        let command = MidiCommand::new(CommandType::NoteOn, 7, vec![0x40, 0x7F]);
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
         let original_timed_command = TimedCommand {
             delta_time: Some(delta_time.clone()),
             command: command.clone(),

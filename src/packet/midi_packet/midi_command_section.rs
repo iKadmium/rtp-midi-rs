@@ -2,42 +2,50 @@ use log::trace;
 
 use super::midi_timed_command::TimedCommand;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub struct MidiCommandSection {
-    flags: u8,
+    flags: MidiCommandSectionFlags,
     commands: Vec<TimedCommand>,
 }
 
+#[repr(u8)]
+enum MidiCommandSectionFlagMasks {
+    B = 0b1000_0000,
+    J = 0b0100_0000,
+    Z = 0b0010_0000,
+    P = 0b0001_0000,
+}
+
+type MidiCommandSectionFlags = u8;
+
+trait MidiCommandSectionFlagsExt {
+    fn get_flag(&self, flag: MidiCommandSectionFlagMasks) -> bool;
+}
+
+impl MidiCommandSectionFlagsExt for MidiCommandSectionFlags {
+    fn get_flag(&self, flag: MidiCommandSectionFlagMasks) -> bool {
+        self & flag as u8 != 0
+    }
+}
+
 impl MidiCommandSection {
-    pub fn new() -> Self {
+    pub fn new(commands: &[TimedCommand]) -> Self {
         MidiCommandSection {
-            flags: 0,
-            commands: Vec::new(),
+            flags: 0, // TODO: set flags as needed
+            commands: commands.to_vec(),
         }
     }
 
-    pub fn b_flag(&self) -> bool {
-        self.length() > 0x000F
+    fn big_header(&self) -> bool {
+        self.size() > 0x000F
     }
 
-    pub fn j_flag(&self) -> bool {
-        self.flags & 0b0100_0000 != 0
-    }
-
-    pub fn z_flag(&self) -> bool {
-        self.flags & 0b0010_0000 != 0
-    }
-
-    pub fn p_flag(&self) -> bool {
-        self.flags & 0b0001_0000 != 0
-    }
-
-    pub fn length(&self) -> usize {
-        let mut length: usize = if self.b_flag() { 2 } else { 1 };
+    pub fn size(&self) -> usize {
+        let mut length: usize = 0;
         let mut running_status: Option<u8> = None;
         for (i, command) in self.commands.iter().enumerate() {
-            if i > 0 || self.z_flag() {
+            if i > 0 || self.flags.get_flag(MidiCommandSectionFlagMasks::Z) {
                 match command.delta_time() {
                     Some(ref delta_time) => length += delta_time.size(),
                     None => {
@@ -45,12 +53,18 @@ impl MidiCommandSection {
                     }
                 }
             }
-            if Some(command.command().status) != running_status {
+            if Some(command.command().status()) != running_status {
                 length += 1;
             }
-            length += command.command().data.len();
-            running_status = Some(command.command().status);
+            length += command.command().size();
+            running_status = Some(command.command().status());
         }
+        if length > 0x0F {
+            length += 2; // 2 bytes for big header
+        } else {
+            length += 1; // 1 byte for small header
+        }
+
         return length;
     }
 
@@ -61,19 +75,18 @@ impl MidiCommandSection {
     pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
         trace!("Parsing MIDI command section from bytes, {:#?}", bytes);
         let flags_and_length_lo = bytes[0];
-        let b_flag = flags_and_length_lo & 0b1000_0000 != 0;
-        let flags = flags_and_length_lo & 0b0111_0000;
+        let flags: MidiCommandSectionFlags = flags_and_length_lo & 0b1111_0000;
+        let length_p1 = flags_and_length_lo & 0x0F;
 
         let mut offset = 1;
 
-        let length = if b_flag {
+        let length = if flags.get_flag(MidiCommandSectionFlagMasks::B) {
             let flags_and_length_hi = bytes[1];
-            let length = u16::from_be_bytes([flags_and_length_lo, flags_and_length_hi]) as usize;
+            let length = u16::from_be_bytes([length_p1, flags_and_length_hi]) as usize;
             offset += 1;
             length
         } else {
-            let length = (flags_and_length_lo & 0x0F) as usize;
-            length
+            length_p1 as usize
         };
 
         let mut commands = Vec::new();
@@ -85,7 +98,7 @@ impl MidiCommandSection {
             let (timed_command, bytes_read) =
                 TimedCommand::from_be_bytes(&bytes[offset..], running_status, read_delta_time)?;
             read_delta_time = true;
-            running_status = Some(timed_command.command().status);
+            running_status = Some(timed_command.command().status());
             commands.push(timed_command);
             offset += bytes_read;
         }
@@ -94,7 +107,7 @@ impl MidiCommandSection {
     }
 
     pub fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<usize, std::io::Error> {
-        let total_length = self.length();
+        let total_length = self.size();
         let mut offset: usize;
         if total_length > 0x000F {
             // If length > 0x0F, use 12 bits for length and 4 bits for flags
@@ -114,13 +127,13 @@ impl MidiCommandSection {
         let mut running_status: Option<u8> = None;
         for command in &self.commands {
             let write_delta_time = if offset == command_start {
-                self.z_flag()
+                self.flags.get_flag(MidiCommandSectionFlagMasks::Z)
             } else {
                 true
             };
             let bytes_written =
                 command.write_to_bytes(&mut bytes[offset..], running_status, write_delta_time)?;
-            running_status = Some(command.command().status);
+            running_status = Some(command.command().status());
             offset += bytes_written;
         }
 

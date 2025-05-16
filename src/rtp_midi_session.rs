@@ -1,7 +1,9 @@
 use log::{debug, error, info, trace, warn};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task;
@@ -9,21 +11,26 @@ use tokio::task;
 use crate::packet::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packet::ControlPacket;
 use crate::packet::midi_packet::midi_packet::MidiPacket;
+use crate::packet::midi_packet::midi_timed_command::TimedCommand;
 use crate::packet::packet::RtpMidiPacket;
 use crate::packet::session_initiation_packet::SessionInitiationPacket;
 
-pub struct RtpMidiServer {
+pub struct RtpMidiSession {
     name: String,
     ssrc: u32,
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
+    participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+    sequence_number: Arc<Mutex<u16>>, // Add running sequence number
 }
 
-impl RtpMidiServer {
+impl RtpMidiSession {
     pub fn new(name: String, ssrc: u32) -> Self {
         Self {
             name,
             ssrc,
             listeners: Arc::new(Mutex::new(HashMap::new())),
+            participants: Arc::new(Mutex::new(HashMap::new())),
+            sequence_number: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -44,11 +51,14 @@ impl RtpMidiServer {
 
         let server_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
+        let participants = Arc::clone(&self.participants);
+        let session_seq = Arc::clone(&self.sequence_number);
 
         let control_task = task::spawn(Self::listen_for_control(
             control_port,
             server_name.clone(),
             self.ssrc,
+            participants.clone(),
         ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
@@ -56,6 +66,8 @@ impl RtpMidiServer {
             server_name,
             self.ssrc,
             listeners_midi,
+            participants,
+            session_seq,
         ));
 
         println!(
@@ -97,7 +109,12 @@ impl RtpMidiServer {
         Ok(())
     }
 
-    async fn listen_for_control(control_port: u16, name: String, ssrc: u32) {
+    async fn listen_for_control(
+        control_port: u16,
+        name: String,
+        ssrc: u32,
+        participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+    ) {
         let socket = Arc::new(UdpSocket::bind(("0.0.0.0", control_port)).await.unwrap());
         socket.set_broadcast(true).unwrap();
 
@@ -122,7 +139,7 @@ impl RtpMidiServer {
                                     .await;
                                 }
                                 ControlPacket::EndSession => {
-                                    Self::handle_end_session(src);
+                                    Self::handle_end_session(src, &participants);
                                 }
                                 _ => {
                                     warn!("Control: Unhandled control packet: {:?}", packet);
@@ -147,6 +164,8 @@ impl RtpMidiServer {
         server_name: String,
         ssrc: u32,
         listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
+        participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+        session_seq: Arc<Mutex<u16>>,
     ) {
         let socket = Arc::new(UdpSocket::bind(("0.0.0.0", midi_port)).await.unwrap());
         socket.set_broadcast(true).unwrap();
@@ -179,6 +198,7 @@ impl RtpMidiServer {
                                             clock_sync_packet,
                                             src,
                                             ssrc,
+                                            participants.clone(),
                                         )
                                         .await;
                                     }
@@ -191,6 +211,9 @@ impl RtpMidiServer {
                                 },
                                 RtpMidiPacket::Midi(midi_packet) => {
                                     debug!("MIDI: Parsed MIDI packet: {:#?}", midi_packet);
+                                    // Update sequence number on receive
+                                    let mut seq = session_seq.lock().await;
+                                    *seq = midi_packet.sequence_number().wrapping_add(1);
                                     if let Some(callback) =
                                         listeners.lock().await.get("midi_packet")
                                     {
@@ -245,8 +268,16 @@ impl RtpMidiServer {
         }
     }
 
-    fn handle_end_session(src: std::net::SocketAddr) {
+    fn handle_end_session(
+        src: std::net::SocketAddr,
+        participants: &Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+    ) {
         info!("Control: Ending session with {}", src);
+        let participants = Arc::clone(participants);
+        tokio::spawn(async move {
+            let mut lock = participants.lock().await;
+            lock.remove(&src);
+        });
     }
 
     async fn handle_clock_sync(
@@ -254,6 +285,7 @@ impl RtpMidiServer {
         packet: ClockSyncPacket,
         src: std::net::SocketAddr,
         ssrc: u32,
+        participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     ) {
         match packet.count {
             0 => {
@@ -276,6 +308,14 @@ impl RtpMidiServer {
             2 => {
                 // Finalize clock sync
                 info!("MIDI: Clock sync finalized with {}", src);
+                let mut lock = participants.lock().await;
+                lock.insert(
+                    src,
+                    Participant {
+                        addr: src,
+                        last_clock_sync: Instant::now(),
+                    },
+                );
             }
             _ => {
                 error!(
@@ -286,9 +326,50 @@ impl RtpMidiServer {
         }
     }
 
+    pub async fn remove_stale(&self) {
+        let mut participants = self.participants.lock().await;
+        let now = Instant::now();
+        participants.retain(|_, p| now.duration_since(p.last_clock_sync) < Duration::from_secs(60));
+    }
+
+    pub async fn all_participants(&self) -> Vec<SocketAddr> {
+        let participants = self.participants.lock().await;
+        participants.keys().cloned().collect()
+    }
+
+    pub async fn send_midi(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
+        let participants = self.all_participants().await;
+        let mut seq = self.sequence_number.lock().await;
+        let packet = MidiPacket::new(
+            *seq,                             // Sequence number
+            Self::current_timestamp() as u32, // Timestamp
+            self.ssrc,
+            commands,
+        );
+        *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
+        let mut data = vec![0u8; packet.size()];
+        packet.write_to_bytes(&mut data)?;
+
+        info!("Sending MIDI packet to {} participants", participants.len());
+        info!("MIDI packet: {:?}", packet);
+
+        let socket = UdpSocket::bind(("0.0.0.0", 0)).await?; // Use ephemeral port for sending
+        for addr in participants {
+            socket.send_to(&data, addr).await?;
+        }
+        Ok(())
+    }
+
     fn current_timestamp() -> u64 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        (now.as_secs() * 10_000_000) + (now.subsec_nanos() as u64 / 100)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis() as u64
     }
+}
+
+pub struct Participant {
+    pub addr: SocketAddr,
+    pub last_clock_sync: Instant,
 }

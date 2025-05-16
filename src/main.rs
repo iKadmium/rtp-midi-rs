@@ -1,9 +1,13 @@
 mod packet;
-mod rtp_midi_server;
+mod rtp_midi_session;
+
+use std::sync::Arc;
 
 use log::info;
-use packet::midi_packet::midi_packet::MidiPacket;
-use rtp_midi_server::RtpMidiServer;
+use packet::midi_packet::{
+    midi_command::MidiCommand, midi_packet::MidiPacket, midi_timed_command::TimedCommand,
+};
+use rtp_midi_session::RtpMidiSession;
 use tokio; // Add tokio runtime for async main
 
 #[tokio::main]
@@ -12,10 +16,30 @@ async fn main() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    let server = RtpMidiServer::new("RTPMidiServer".to_string(), 12345);
+    let server = Arc::new(RtpMidiSession::new("RTPMidiServer".to_string(), 12345));
+    let server_clone = server.clone();
 
     server
-        .add_listener("midi_packet".to_string(), handle_midi_packet)
+        .add_listener("midi_packet".to_string(), move |data| {
+            let server = server_clone.clone();
+            tokio::spawn(async move {
+                handle_midi_packet(data);
+
+                let commands = vec![TimedCommand::new(
+                    None,
+                    MidiCommand::NoteOn {
+                        channel: 0,
+                        key: 38,
+                        velocity: 127,
+                    },
+                )];
+
+                match server.send_midi(&commands).await {
+                    Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
+                    Err(e) => info!("Error sending MIDI packet: {:?}", e),
+                };
+            });
+        })
         .await;
 
     server
