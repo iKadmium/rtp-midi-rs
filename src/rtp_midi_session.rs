@@ -22,8 +22,8 @@ pub struct RtpMidiSession {
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
     participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     sequence_number: Arc<Mutex<u16>>,
-    midi_socket: Arc<Mutex<UdpSocket>>,
-    control_socket: Arc<Mutex<UdpSocket>>,
+    midi_socket: Arc<UdpSocket>,
+    control_socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
 }
 
 impl RtpMidiSession {
@@ -35,8 +35,8 @@ impl RtpMidiSession {
             listeners: Arc::new(Mutex::new(HashMap::new())),
             participants: Arc::new(Mutex::new(HashMap::new())),
             sequence_number: Arc::new(Mutex::new(0)),
-            control_socket: Arc::new(Mutex::new(UdpSocket::bind(("0.0.0.0", port)).await?)),
-            midi_socket: Arc::new(Mutex::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?)),
+            control_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port)).await?), // Removed Mutex::new()
+            midi_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?),
         })
     }
 
@@ -114,15 +114,16 @@ impl RtpMidiSession {
     }
 
     async fn listen_for_control(
-        socket: Arc<Mutex<UdpSocket>>,
+        socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
         name: String,
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     ) {
-        let socket = socket.lock().await;
         let mut buf = [0; 65535];
         loop {
+            // Removed: let socket = socket.lock().await;
             match socket.recv_from(&mut buf).await {
+                // Use socket directly
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
                     match ControlPacket::parse(&buf[..amt]) {
@@ -132,7 +133,7 @@ impl RtpMidiSession {
                                 ControlPacket::SessionInitiation(session_initiation_packet) => {
                                     info!("Control: Received session initiation from {}", src);
                                     Self::send_invitation_response(
-                                        &socket,
+                                        &socket, // Pass &socket (Arc derefs to UdpSocket)
                                         src,
                                         ssrc,
                                         session_initiation_packet.initiator_token,
@@ -162,7 +163,7 @@ impl RtpMidiSession {
     }
 
     async fn listen_for_midi(
-        socket: Arc<Mutex<UdpSocket>>,
+        socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
         server_name: String,
         ssrc: u32,
         listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
@@ -172,10 +173,8 @@ impl RtpMidiSession {
     ) {
         let mut buf = [0; 65535];
         loop {
-            trace!("Listen: Waiting for midi socket lock");
-            let socket = socket.lock().await;
-            trace!("Listen: Got midi socket lock");
             match socket.recv_from(&mut buf).await {
+                // Use socket directly
                 Ok((amt, src)) => {
                     trace!("MIDI: Received {} bytes from {}", amt, src);
                     match RtpMidiPacket::parse(&buf[..amt]) {
@@ -186,7 +185,7 @@ impl RtpMidiSession {
                                     ControlPacket::SessionInitiation(session_initiation_packet) => {
                                         debug!("MIDI: Received session initiation from {}", src);
                                         Self::send_invitation_response(
-                                            &socket,
+                                            &socket, // Pass &socket (Arc derefs to UdpSocket)
                                             src,
                                             ssrc,
                                             session_initiation_packet.initiator_token,
@@ -197,7 +196,7 @@ impl RtpMidiSession {
                                     ControlPacket::ClockSync(clock_sync_packet) => {
                                         debug!("MIDI: Received clock sync from {}", src);
                                         Self::handle_clock_sync(
-                                            &socket,
+                                            &socket, // Pass &socket (Arc derefs to UdpSocket)
                                             clock_sync_packet,
                                             src,
                                             ssrc,
@@ -345,9 +344,6 @@ impl RtpMidiSession {
 
     pub async fn send_midi(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
         let participants = self.all_participants().await;
-        trace!("Send: Waiting for midi socket lock");
-        let socket = self.midi_socket.lock().await;
-        trace!("Send: Got midi socket lock");
         let mut seq = self.sequence_number.lock().await;
         let packet = MidiPacket::new(
             *seq,                                            // Sequence number
@@ -361,7 +357,7 @@ impl RtpMidiSession {
 
         info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {
-            socket.send_to(&data, addr).await?;
+            self.midi_socket.send_to(&data, addr).await?; // Use self.midi_socket directly
         }
         Ok(())
     }
