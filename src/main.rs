@@ -16,23 +16,38 @@ async fn main() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    let server = Arc::new(RtpMidiSession::new("RTPMidiServer".to_string(), 12345));
+    let server = Arc::new(
+        RtpMidiSession::new("RTPMidiServer".to_string(), 12345, 5004)
+            .await
+            .unwrap(),
+    );
     let server_clone = server.clone();
 
     server
         .add_listener("midi_packet".to_string(), move |data| {
             let server = server_clone.clone();
             tokio::spawn(async move {
-                handle_midi_packet(data);
+                handle_midi_packet(&data);
 
-                let commands = vec![TimedCommand::new(
-                    None,
-                    MidiCommand::NoteOn {
-                        channel: 0,
-                        key: 38,
-                        velocity: 127,
-                    },
-                )];
+                let commands: Vec<TimedCommand> = data
+                    .commands()
+                    .iter()
+                    .filter_map(|c| match c.command() {
+                        MidiCommand::NoteOn {
+                            channel,
+                            key,
+                            velocity,
+                        } => Some(TimedCommand::new(
+                            None,
+                            MidiCommand::NoteOn {
+                                channel: *channel,
+                                key: key.saturating_sub(12),
+                                velocity: *velocity,
+                            },
+                        )),
+                        _ => None,
+                    })
+                    .collect();
 
                 match server.send_midi(&commands).await {
                     Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
@@ -43,12 +58,12 @@ async fn main() {
         .await;
 
     server
-        .start(5004)
+        .start()
         .await
         .expect("Error while running the server");
 }
 
-fn handle_midi_packet(data: MidiPacket) {
+fn handle_midi_packet(data: &MidiPacket) {
     for command in data.commands() {
         info!("Received command: {:?}", command);
     }

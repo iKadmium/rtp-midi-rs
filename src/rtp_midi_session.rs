@@ -20,18 +20,22 @@ pub struct RtpMidiSession {
     ssrc: u32,
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
     participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
-    sequence_number: Arc<Mutex<u16>>, // Add running sequence number
+    sequence_number: Arc<Mutex<u16>>,
+    midi_socket: Arc<Mutex<UdpSocket>>,
+    control_socket: Arc<Mutex<UdpSocket>>,
 }
 
 impl RtpMidiSession {
-    pub fn new(name: String, ssrc: u32) -> Self {
-        Self {
+    pub async fn new(name: String, ssrc: u32, port: u16) -> std::io::Result<Self> {
+        Ok(Self {
             name,
             ssrc,
             listeners: Arc::new(Mutex::new(HashMap::new())),
             participants: Arc::new(Mutex::new(HashMap::new())),
             sequence_number: Arc::new(Mutex::new(0)),
-        }
+            control_socket: Arc::new(Mutex::new(UdpSocket::bind(("0.0.0.0", port)).await?)),
+            midi_socket: Arc::new(Mutex::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?)),
+        })
     }
 
     pub async fn add_listener<F>(&self, event_name: String, callback: F)
@@ -42,38 +46,33 @@ impl RtpMidiSession {
         listeners.insert(event_name, Box::new(callback));
     }
 
-    pub async fn start(&self, control_port: u16) -> std::io::Result<()> {
-        let midi_port = control_port + 1;
-
+    pub async fn start(&self) -> std::io::Result<()> {
         // Advertise the service on mDNS
         // Self::advertise_service(&self.name.clone(), midi_port)
         //     .expect("Failed to advertise service");
 
-        let server_name = self.name.clone();
+        let session_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
         let participants = Arc::clone(&self.participants);
         let session_seq = Arc::clone(&self.sequence_number);
 
         let control_task = task::spawn(Self::listen_for_control(
-            control_port,
-            server_name.clone(),
+            self.control_socket.clone(),
+            session_name.clone(),
             self.ssrc,
             participants.clone(),
         ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
-            midi_port,
-            server_name,
+            self.midi_socket.clone(),
+            session_name,
             self.ssrc,
             listeners_midi,
             participants,
             session_seq,
         ));
 
-        println!(
-            "RTP MIDI server starting on control port {} and MIDI port {}",
-            control_port, midi_port
-        );
+        println!("RTP MIDI server starting");
 
         tokio::select! {
             _ = control_task => {
@@ -110,14 +109,12 @@ impl RtpMidiSession {
     }
 
     async fn listen_for_control(
-        control_port: u16,
+        socket: Arc<Mutex<UdpSocket>>,
         name: String,
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     ) {
-        let socket = Arc::new(UdpSocket::bind(("0.0.0.0", control_port)).await.unwrap());
-        socket.set_broadcast(true).unwrap();
-
+        let socket = socket.lock().await;
         let mut buf = [0; 65535];
         loop {
             match socket.recv_from(&mut buf).await {
@@ -160,18 +157,18 @@ impl RtpMidiSession {
     }
 
     async fn listen_for_midi(
-        midi_port: u16,
+        socket: Arc<Mutex<UdpSocket>>,
         server_name: String,
         ssrc: u32,
         listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         session_seq: Arc<Mutex<u16>>,
     ) {
-        let socket = Arc::new(UdpSocket::bind(("0.0.0.0", midi_port)).await.unwrap());
-        socket.set_broadcast(true).unwrap();
-
         let mut buf = [0; 65535];
         loop {
+            trace!("Listen: Waiting for midi socket lock");
+            let socket = socket.lock().await;
+            trace!("Listen: Got midi socket lock");
             match socket.recv_from(&mut buf).await {
                 Ok((amt, src)) => {
                     trace!("MIDI: Received {} bytes from {}", amt, src);
@@ -339,6 +336,9 @@ impl RtpMidiSession {
 
     pub async fn send_midi(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
         let participants = self.all_participants().await;
+        trace!("Send: Waiting for midi socket lock");
+        let socket = self.midi_socket.lock().await;
+        trace!("Send: Got midi socket lock");
         let mut seq = self.sequence_number.lock().await;
         let packet = MidiPacket::new(
             *seq,                             // Sequence number
@@ -353,7 +353,7 @@ impl RtpMidiSession {
         info!("Sending MIDI packet to {} participants", participants.len());
         info!("MIDI packet: {:?}", packet);
 
-        let socket = UdpSocket::bind(("0.0.0.0", 0)).await?; // Use ephemeral port for sending
+        info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {
             socket.send_to(&data, addr).await?;
         }
