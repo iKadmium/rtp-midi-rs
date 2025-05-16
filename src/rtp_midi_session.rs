@@ -18,6 +18,7 @@ use crate::packet::session_initiation_packet::SessionInitiationPacket;
 pub struct RtpMidiSession {
     name: String,
     ssrc: u32,
+    start_time: Instant, // Added start_time
     listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
     participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     sequence_number: Arc<Mutex<u16>>,
@@ -30,6 +31,7 @@ impl RtpMidiSession {
         Ok(Self {
             name,
             ssrc,
+            start_time: Instant::now(), // Initialize start_time
             listeners: Arc::new(Mutex::new(HashMap::new())),
             participants: Arc::new(Mutex::new(HashMap::new())),
             sequence_number: Arc::new(Mutex::new(0)),
@@ -53,14 +55,16 @@ impl RtpMidiSession {
 
         let session_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
-        let participants = Arc::clone(&self.participants);
+        let participants_clone_control = Arc::clone(&self.participants); // Renamed for clarity
+        let participants_clone_midi = Arc::clone(&self.participants); // Renamed for clarity
         let session_seq = Arc::clone(&self.sequence_number);
+        let start_time = self.start_time; // Capture start_time
 
         let control_task = task::spawn(Self::listen_for_control(
             self.control_socket.clone(),
             session_name.clone(),
             self.ssrc,
-            participants.clone(),
+            participants_clone_control,
         ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
@@ -68,8 +72,9 @@ impl RtpMidiSession {
             session_name,
             self.ssrc,
             listeners_midi,
-            participants,
+            participants_clone_midi,
             session_seq,
+            start_time, // Pass start_time
         ));
 
         println!("RTP MIDI server starting");
@@ -163,6 +168,7 @@ impl RtpMidiSession {
         listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         session_seq: Arc<Mutex<u16>>,
+        start_time: Instant, // Added start_time parameter
     ) {
         let mut buf = [0; 65535];
         loop {
@@ -196,6 +202,7 @@ impl RtpMidiSession {
                                             src,
                                             ssrc,
                                             participants.clone(),
+                                            start_time, // Pass start_time
                                         )
                                         .await;
                                     }
@@ -247,7 +254,8 @@ impl RtpMidiSession {
             name: Some(name.to_string()),
         };
 
-        let response_bytes = response_packet.to_bytes();
+        let mut response_bytes = vec![0; response_packet.size()];
+        response_packet.write_to_bytes(&mut response_bytes).unwrap();
 
         if let Err(e) = socket.send_to(&response_bytes, src).await {
             error!(
@@ -283,18 +291,17 @@ impl RtpMidiSession {
         src: std::net::SocketAddr,
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+        start_time: Instant, // Added start_time parameter
     ) {
         match packet.count {
             0 => {
                 // Respond with count = 1
-                let timestamp2 = Self::current_timestamp();
-                let response_packet = ClockSyncPacket {
-                    count: 1,
-                    timestamps: vec![packet.timestamps[0], timestamp2, 0],
-                    sender_ssrc: ssrc,
-                };
+                let timestamp2 = Self::current_timestamp(start_time); // Use start_time
+                let response_packet =
+                    ClockSyncPacket::new(1, [packet.timestamps[0], timestamp2, 0], ssrc);
 
-                let response_bytes = response_packet.to_bytes();
+                let mut response_bytes = [0; ClockSyncPacket::SIZE];
+                response_packet.write_to_bytes(&mut response_bytes).unwrap();
 
                 if let Err(e) = socket.send_to(&response_bytes, src).await {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
@@ -305,6 +312,8 @@ impl RtpMidiSession {
             2 => {
                 // Finalize clock sync
                 info!("MIDI: Clock sync finalized with {}", src);
+                let latency_estimate = (packet.timestamps[2] - packet.timestamps[0]) as f32 / 10.0;
+                info!("MIDI: Clock sync latency estimate: {}ms", latency_estimate);
                 let mut lock = participants.lock().await;
                 lock.insert(
                     src,
@@ -341,17 +350,14 @@ impl RtpMidiSession {
         trace!("Send: Got midi socket lock");
         let mut seq = self.sequence_number.lock().await;
         let packet = MidiPacket::new(
-            *seq,                             // Sequence number
-            Self::current_timestamp() as u32, // Timestamp
+            *seq,                                            // Sequence number
+            Self::current_timestamp(self.start_time) as u32, // Timestamp relative to start_time
             self.ssrc,
             commands,
         );
         *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
         let mut data = vec![0u8; packet.size()];
         packet.write_to_bytes(&mut data)?;
-
-        info!("Sending MIDI packet to {} participants", participants.len());
-        info!("MIDI packet: {:?}", packet);
 
         info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {
@@ -360,12 +366,9 @@ impl RtpMidiSession {
         Ok(())
     }
 
-    fn current_timestamp() -> u64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-            .as_millis() as u64
+    fn current_timestamp(start_time: Instant) -> u64 {
+        // Modified to take start_time
+        (Instant::now() - start_time).as_micros() as u64 / 100
     }
 }
 

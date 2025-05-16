@@ -12,8 +12,10 @@ pub struct SessionInitiationPacket {
 }
 
 impl SessionInitiationPacket {
+    pub const MIN_SIZE: usize = 16;
+
     pub fn parse(buffer: &[u8]) -> Result<Self, Error> {
-        if buffer.len() < 16 {
+        if buffer.len() < SessionInitiationPacket::MIN_SIZE {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "Buffer too short to be a valid session initiation packet",
@@ -44,32 +46,34 @@ impl SessionInitiationPacket {
         })
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
+    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        let length = self.size();
 
-        // Add the header
-        buffer.push(255);
-        buffer.push(255);
-
-        // Add the command
-        buffer.extend_from_slice(&self.command);
-
-        // Add the protocol version
-        buffer.extend_from_slice(&self.protocol_version.to_be_bytes());
-
-        // Add the initiator token
-        buffer.extend_from_slice(&self.initiator_token.to_be_bytes());
-
-        // Add the sender SSRC
-        buffer.extend_from_slice(&self.sender_ssrc.to_be_bytes());
-
-        // Add the name if it exists
-        if let Some(name) = &self.name {
-            buffer.extend_from_slice(name.as_bytes());
-            buffer.push(0); // Null terminator
+        if bytes.len() < length {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Buffer too short to write session initiation packet",
+            ));
         }
 
-        buffer
+        bytes[0] = 255;
+        bytes[1] = 255;
+
+        bytes[2..4].copy_from_slice(&self.command);
+        bytes[4..8].copy_from_slice(&self.protocol_version.to_be_bytes());
+        bytes[8..12].copy_from_slice(&self.initiator_token.to_be_bytes());
+        bytes[12..16].copy_from_slice(&self.sender_ssrc.to_be_bytes());
+
+        if let Some(name) = &self.name {
+            bytes[16..16 + name.len()].copy_from_slice(name.as_bytes());
+            bytes[16 + name.len()] = 0; // Null terminator
+        }
+
+        Ok(length)
+    }
+
+    pub fn size(&self) -> usize {
+        SessionInitiationPacket::MIN_SIZE + self.name.as_ref().map_or(0, |name| name.len() + 1)
     }
 }
 

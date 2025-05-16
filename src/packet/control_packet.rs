@@ -23,7 +23,7 @@ impl ControlPacket {
         };
         match command.as_str() {
             "CK" => {
-                let clock_sync_packet = ClockSyncPacket::parse(buffer)?;
+                let clock_sync_packet = ClockSyncPacket::from_be_bytes(buffer)?;
                 return Ok(ControlPacket::ClockSync(clock_sync_packet));
             }
             "IN" => {

@@ -5,12 +5,22 @@ use std::{
 
 pub struct ClockSyncPacket {
     pub count: u8,
-    pub timestamps: Vec<u64>,
+    pub timestamps: [u64; 3],
     pub sender_ssrc: u32,
 }
 
 impl ClockSyncPacket {
-    pub fn parse(buffer: &[u8]) -> Result<Self, Error> {
+    pub const SIZE: usize = 36;
+
+    pub fn new(count: u8, timestamps: [u64; 3], sender_ssrc: u32) -> Self {
+        ClockSyncPacket {
+            count,
+            timestamps,
+            sender_ssrc,
+        }
+    }
+
+    pub fn from_be_bytes(buffer: &[u8]) -> Result<Self, Error> {
         if buffer.len() < 12 {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -28,19 +38,10 @@ impl ClockSyncPacket {
         let sender_ssrc = u32::from_be_bytes(buffer[4..8].try_into().unwrap());
         let count = buffer[8];
 
-        let mut timestamps = Vec::new();
+        let mut timestamps = [0; 3];
 
-        for i in (8..buffer.len()).step_by(4) {
-            timestamps.push(u64::from_be_bytes([
-                0,
-                0,
-                0,
-                0,
-                buffer[i],
-                buffer[i + 1],
-                buffer[i + 2],
-                buffer[i + 3],
-            ]));
+        for i in 0..3 {
+            timestamps[i] = u64::from_be_bytes(buffer[12 + i * 8..20 + i * 8].try_into().unwrap());
         }
 
         Ok(ClockSyncPacket {
@@ -58,27 +59,22 @@ impl ClockSyncPacket {
             && buffer[3] == b'K'
     }
 
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
+    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        bytes[0] = 255;
+        bytes[1] = 255;
+        bytes[2] = b'C';
+        bytes[3] = b'K';
 
-        // Add the header
-        buffer.push(255);
-        buffer.push(255);
-        buffer.push(b'C');
-        buffer.push(b'K');
+        bytes[4..8].copy_from_slice(&self.sender_ssrc.to_be_bytes());
 
-        // Add the sender SSRC
-        buffer.extend_from_slice(&self.sender_ssrc.to_be_bytes());
+        bytes[8] = self.count;
+        bytes[9..12].copy_from_slice(&[0, 0, 0]); // Reserved bytes
 
-        // Add the count
-        buffer.push(self.count);
+        bytes[12..20].copy_from_slice(&self.timestamps[0].to_be_bytes());
+        bytes[20..28].copy_from_slice(&self.timestamps[1].to_be_bytes());
+        bytes[28..36].copy_from_slice(&self.timestamps[2].to_be_bytes());
 
-        // Add the timestamps
-        for timestamp in &self.timestamps {
-            buffer.extend_from_slice(&timestamp.to_be_bytes()[4..]);
-        }
-
-        buffer
+        Ok(size_of::<Self>())
     }
 }
 
