@@ -49,17 +49,7 @@ impl MidiCommand {
             MidiCommand::PitchBend { .. } => 2,
         }
     }
-    pub fn channel(&self) -> u8 {
-        match self {
-            MidiCommand::NoteOff { channel, .. }
-            | MidiCommand::NoteOn { channel, .. }
-            | MidiCommand::PolyphonicKeyPressure { channel, .. }
-            | MidiCommand::ControlChange { channel, .. }
-            | MidiCommand::ProgramChange { channel, .. }
-            | MidiCommand::ChannelPressure { channel, .. }
-            | MidiCommand::PitchBend { channel, .. } => *channel,
-        }
-    }
+
     pub fn status(&self) -> u8 {
         match self {
             MidiCommand::NoteOff { channel, .. } => 0x80 | (channel & 0x0F),
@@ -229,11 +219,16 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        assert_eq!(command.channel(), 7);
         assert_eq!(command.status(), 0x97);
         assert_eq!(command.size(), 2);
         // Check fields
-        if let MidiCommand::NoteOn { key, velocity, .. } = command {
+        if let MidiCommand::NoteOn {
+            key,
+            velocity,
+            channel,
+        } = command
+        {
+            assert_eq!(channel, 7);
             assert_eq!(key, 0x40);
             assert_eq!(velocity, 0x7F);
         } else {

@@ -50,8 +50,8 @@ impl RtpMidiSession {
 
     pub async fn start(&self) -> std::io::Result<()> {
         // Advertise the service on mDNS
-        // Self::advertise_service(&self.name.clone(), midi_port)
-        //     .expect("Failed to advertise service");
+        Self::advertise_service(&self.name.clone(), self.control_socket.local_addr()?.port())
+            .expect("Failed to advertise service");
 
         let session_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
@@ -352,8 +352,8 @@ impl RtpMidiSession {
             commands,
         );
         *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
-        let mut data = vec![0u8; packet.size()];
-        packet.write_to_bytes(&mut data)?;
+        let mut data = vec![0u8; packet.size(false)];
+        packet.write_to_bytes(&mut data, false)?;
 
         info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {

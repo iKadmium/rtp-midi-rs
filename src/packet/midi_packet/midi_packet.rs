@@ -1,15 +1,19 @@
-use log::{info, trace};
+use std::io::Cursor;
+
+use log::trace;
+
+use crate::packet::midi_packet::midi_command_list_header::MidiCommandListHeader;
 
 use super::{
-    midi_command_section::MidiCommandSection, midi_packet_header::MidiPacketHeader,
-    midi_timed_command::TimedCommand,
+    midi_command_list_body::MidiCommandListBody, midi_command_list_header::MidiCommandListFlags,
+    midi_packet_header::MidiPacketHeader, midi_timed_command::TimedCommand,
 };
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct MidiPacket {
     header: MidiPacketHeader,
-    command_section: MidiCommandSection,
+    command_list: MidiCommandListBody,
     //recovery_journal: Option<RecoveryJournal>,
 }
 
@@ -17,49 +21,66 @@ impl MidiPacket {
     pub fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &[TimedCommand]) -> Self {
         MidiPacket {
             header: MidiPacketHeader::new(sequence_number, timestamp, ssrc),
-            command_section: MidiCommandSection::new(commands),
+            command_list: MidiCommandListBody::new(commands),
             //recovery_journal: None,
         }
     }
 
     pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+        let mut i = 0;
         let header_bytes = &bytes[0..size_of::<MidiPacketHeader>()];
         let header = MidiPacketHeader::from_be_bytes(header_bytes)?;
+        i += size_of::<MidiPacketHeader>();
         trace!("Parsed header: {:#?}", header);
 
-        let command_section_bytes = &bytes[size_of::<MidiPacketHeader>()..];
-        let command_section = MidiCommandSection::from_be_bytes(command_section_bytes)?;
+        let command_section_header = MidiCommandListHeader::from_be_bytes(
+            &bytes[i..i + MidiCommandListHeader::MAX_HEADER_SIZE],
+        )?;
+        i += MidiCommandListHeader::size(command_section_header.flags().b_flag());
+
+        let command_section_bytes = &bytes[i..i + command_section_header.length()];
+        let command_section = MidiCommandListBody::from_be_bytes(
+            command_section_bytes,
+            command_section_header.flags().z_flag(),
+        )?;
         trace!("Parsed command section: {:#?}", command_section);
 
-        // let recovery_journal = if command_section.j_flag() {
-        //     let bytes_read = command_section_bytes.len() + command_section.length() as usize;
-        //     let journal_bytes = &bytes[bytes_read..];
-        //     Some(RecoveryJournal::from_be_bytes(journal_bytes)?)
-        // } else {
-        //     None
-        // };
+        let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
+            let journal_bytes = &bytes[i..];
+            //Some(RecoveryJournal::from_be_bytes(journal_bytes)?)
+            None // Placeholder for recovery journal parsing
+        } else {
+            None
+        };
 
         Ok(Self {
             header,
-            command_section,
+            command_list: command_section,
             //recovery_journal,
         })
     }
 
-    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<usize, std::io::Error> {
+    pub fn write_to_bytes(&self, bytes: &mut [u8], z_flag: bool) -> Result<usize, std::io::Error> {
         let mut bytes_written = self.header.write_to_bytes(bytes)?;
+
+        let command_section_header =
+            MidiCommandListHeader::build_for(&self.command_list, false, z_flag, false);
+        bytes_written += command_section_header.write_to_bytes(&mut bytes[bytes_written..])?;
         bytes_written += self
-            .command_section
-            .write_to_bytes(&mut bytes[size_of::<MidiPacketHeader>()..])?;
+            .command_list
+            .write_to_bytes(&mut bytes[bytes_written..], z_flag)?;
         Ok(bytes_written)
     }
 
-    pub fn size(&self) -> usize {
-        size_of::<MidiPacketHeader>() + self.command_section.size()
+    pub fn size(&self, z_flag: bool) -> usize {
+        let command_section_size = self.command_list.size(z_flag);
+        let needs_b_flag = MidiCommandListFlags::needs_b_flag(command_section_size);
+        let command_section_header_size = MidiCommandListHeader::size(needs_b_flag);
+        return size_of::<MidiPacketHeader>() + command_section_header_size + command_section_size;
     }
 
     pub fn commands(&self) -> &[TimedCommand] {
-        self.command_section.commands()
+        self.command_list.commands()
     }
 
     pub fn sequence_number(&self) -> u16 {
@@ -88,8 +109,8 @@ mod tests {
 
         let packet = MidiPacket::new(sequence_number, timestamp, ssrc, &[timed_command]);
 
-        let mut bytes = vec![0; packet.size()];
-        packet.write_to_bytes(&mut bytes).unwrap();
+        let mut bytes = vec![0; packet.size(false)];
+        packet.write_to_bytes(&mut bytes, false).unwrap();
 
         let parsed_packet = MidiPacket::from_be_bytes(&bytes).unwrap();
 
@@ -100,9 +121,9 @@ mod tests {
         assert_eq!(packet.header.timestamp(), parsed_packet.header.timestamp());
         assert_eq!(packet.header.ssrc(), parsed_packet.header.ssrc());
         assert_eq!(
-            packet.command_section.commands().len(),
-            parsed_packet.command_section.commands().len()
+            packet.command_list.commands().len(),
+            parsed_packet.command_list.commands().len()
         );
-        assert_eq!(packet.command_section, parsed_packet.command_section);
+        assert_eq!(packet.command_list, parsed_packet.command_list);
     }
 }
