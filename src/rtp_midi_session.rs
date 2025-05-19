@@ -26,6 +26,7 @@ pub struct RtpMidiSession {
     sequence_number: Arc<Mutex<u16>>,
     midi_socket: Arc<UdpSocket>,
     control_socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
+    pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>, // addr -> initiator_token
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,6 +45,7 @@ impl RtpMidiSession {
             sequence_number: Arc::new(Mutex::new(0)),
             control_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port)).await?), // Removed Mutex::new()
             midi_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?),
+            pending_invitations: Arc::new(Mutex::new(HashMap::new())), // Initialize pending_invitations
         })
     }
 
@@ -56,6 +58,9 @@ impl RtpMidiSession {
     }
 
     pub async fn start(&self) -> std::io::Result<()> {
+        // Start periodic stale participant removal
+        self.start_stale_removal_task().await;
+
         // Advertise the service on mDNS
         Self::advertise_service(&self.name.clone(), self.control_socket.local_addr()?.port())
             .expect("Failed to advertise service");
@@ -72,6 +77,9 @@ impl RtpMidiSession {
             session_name.clone(),
             self.ssrc,
             participants_clone_control,
+            self.pending_invitations.clone(),
+            self.midi_socket.clone(),
+            start_time,
         ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
@@ -82,6 +90,7 @@ impl RtpMidiSession {
             participants_clone_midi,
             session_seq,
             start_time, // Pass start_time
+            self.pending_invitations.clone(),
         ));
 
         println!("RTP MIDI server starting");
@@ -125,6 +134,9 @@ impl RtpMidiSession {
         name: String,
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
+        midi_socket: Arc<UdpSocket>,
+        start_time: Instant,
     ) {
         let mut buf = [0; 65535];
         loop {
@@ -158,6 +170,36 @@ impl RtpMidiSession {
                                                 "Control: Received session acknowledgment from {}",
                                                 src
                                             );
+                                            // If this was a pending invitation, send clock sync on MIDI port
+                                            if pending_invitations
+                                                .lock()
+                                                .await
+                                                .remove(&src)
+                                                .is_some()
+                                            {
+                                                let now = Self::current_timestamp(start_time);
+                                                let clock_sync =
+                                                    ClockSyncPacket::new(0, [now, 0, 0], ssrc);
+                                                let mut sync_buf = vec![0u8; ClockSyncPacket::SIZE];
+                                                let mut cursor = Cursor::new(&mut sync_buf);
+                                                clock_sync.write(&mut cursor).unwrap();
+                                                // Send on MIDI port (port+1)
+                                                let midi_addr =
+                                                    SocketAddr::new(src.ip(), src.port() + 1);
+                                                if let Err(e) =
+                                                    midi_socket.send_to(&sync_buf, midi_addr).await
+                                                {
+                                                    warn!(
+                                                        "Failed to send clock sync to {}: {}",
+                                                        midi_addr, e
+                                                    );
+                                                } else {
+                                                    info!(
+                                                        "Sent clock sync (count 0) to {}",
+                                                        midi_addr
+                                                    );
+                                                }
+                                            }
                                         }
                                         SessionInitiationPacket::Rejection(_) => {
                                             info!(
@@ -200,6 +242,7 @@ impl RtpMidiSession {
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         session_seq: Arc<Mutex<u16>>,
         start_time: Instant, // Added start_time parameter
+        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
     ) {
         let mut buf = [0; 65535];
         loop {
@@ -238,6 +281,7 @@ impl RtpMidiSession {
                                     }
                                     ControlPacket::ClockSync(clock_sync_packet) => {
                                         debug!("MIDI: Received clock sync from {}", src);
+                                        // Always delegate to handle_clock_sync for further protocol
                                         Self::handle_clock_sync(
                                             &socket, // Pass &socket (Arc derefs to UdpSocket)
                                             clock_sync_packet,
@@ -245,6 +289,7 @@ impl RtpMidiSession {
                                             ssrc,
                                             participants.clone(),
                                             start_time, // Pass start_time
+                                            pending_invitations.clone(),
                                         )
                                         .await;
                                     }
@@ -326,6 +371,7 @@ impl RtpMidiSession {
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         start_time: Instant, // Added start_time parameter
+        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
     ) {
         match packet.count {
             0 => {
@@ -342,6 +388,37 @@ impl RtpMidiSession {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
                 } else {
                     debug!("MIDI: Sent clock sync response to {}", src);
+                }
+            }
+            1 => {
+                // Remove pending invitation and add as participant if needed
+                if pending_invitations.lock().await.remove(&src).is_some() {
+                    let mut lock = participants.lock().await;
+                    lock.insert(
+                        src,
+                        Participant {
+                            addr: src,
+                            last_clock_sync: Instant::now(),
+                        },
+                    );
+                    info!("Added {} as participant after clock sync", src);
+                }
+                // Respond with count = 2
+                let timestamp3 = Self::current_timestamp(start_time); // Use start_time
+                let response_packet = ClockSyncPacket::new(
+                    2,
+                    [packet.timestamps[0], packet.timestamps[1], timestamp3],
+                    ssrc,
+                );
+
+                let mut response_bytes = vec![0u8; ClockSyncPacket::SIZE];
+                let mut cursor = Cursor::new(&mut response_bytes);
+                response_packet.write(&mut cursor).unwrap();
+
+                if let Err(e) = socket.send_to(&response_bytes, src).await {
+                    error!("MIDI: Failed to send clock sync count 2 to {}: {}", src, e);
+                } else {
+                    debug!("MIDI: Sent clock sync count 2 to {}", src);
                 }
             }
             2 => {
@@ -370,7 +447,12 @@ impl RtpMidiSession {
     pub async fn remove_stale(&self) {
         let mut participants = self.participants.lock().await;
         let now = Instant::now();
+        let before = participants.len();
         participants.retain(|_, p| now.duration_since(p.last_clock_sync) < Duration::from_secs(60));
+        let after = participants.len();
+        if before != after {
+            info!("Removed {} stale participant(s)", before - after);
+        }
     }
 
     pub async fn all_participants(&self) -> Vec<SocketAddr> {
@@ -424,6 +506,74 @@ impl RtpMidiSession {
     fn current_timestamp(start_time: Instant) -> u64 {
         // Modified to take start_time
         (Instant::now() - start_time).as_micros() as u64 / 100
+    }
+
+    pub async fn invite_participant(&self, addr: SocketAddr) -> std::io::Result<()> {
+        // 1. Generate token and send invitation
+        let initiator_token = rand::random::<u32>();
+        let invitation =
+            SessionInitiationPacket::new_invitation(initiator_token, self.ssrc, self.name.clone());
+        let mut buf = Vec::with_capacity(invitation.size());
+        invitation.write(&mut buf).unwrap();
+        self.control_socket.send_to(&buf, addr).await?;
+        info!("Sent session invitation to {}", addr);
+
+        // 2. Record pending invitation
+        self.pending_invitations
+            .lock()
+            .await
+            .insert(addr, initiator_token);
+        Ok(())
+    }
+
+    pub async fn start_host_clock_sync(&self) {
+        use tokio::time::{Duration, sleep};
+        let midi_socket = self.midi_socket.clone();
+        let participants = self.participants.clone();
+        let ssrc = self.ssrc;
+        let start_time = self.start_time;
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(10)).await;
+                let now = Self::current_timestamp(start_time);
+                let clock_sync = ClockSyncPacket::new(0, [now, 0, 0], ssrc);
+                let mut sync_buf = vec![0u8; ClockSyncPacket::SIZE];
+                let mut cursor = Cursor::new(&mut sync_buf);
+                clock_sync.write(&mut cursor).unwrap();
+                let addrs: Vec<_> = {
+                    let lock = participants.lock().await;
+                    lock.keys().cloned().collect()
+                };
+                for addr in addrs {
+                    let _ = midi_socket.send_to(&sync_buf, addr).await;
+                }
+                info!("Host: Sent periodic clock sync to all participants");
+            }
+        });
+    }
+
+    pub async fn start_stale_removal_task(&self) {
+        let session = self.clone_for_task();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                session.remove_stale().await;
+            }
+        });
+    }
+
+    fn clone_for_task(&self) -> RtpMidiSession {
+        RtpMidiSession {
+            name: self.name.clone(),
+            ssrc: self.ssrc,
+            start_time: self.start_time,
+            listeners: Arc::clone(&self.listeners),
+            participants: Arc::clone(&self.participants),
+            sequence_number: Arc::clone(&self.sequence_number),
+            midi_socket: Arc::clone(&self.midi_socket),
+            control_socket: Arc::clone(&self.control_socket),
+            pending_invitations: Arc::clone(&self.pending_invitations),
+        }
     }
 }
 

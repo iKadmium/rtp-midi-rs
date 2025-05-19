@@ -57,10 +57,33 @@ async fn main() {
         })
         .await;
 
-    server
-        .start()
-        .await
-        .expect("Error while running the server");
+    // Start the server in a background task
+    let server_task = {
+        let server = server.clone();
+        tokio::spawn(async move {
+            server
+                .start()
+                .await
+                .expect("Error while running the server");
+        })
+    };
+
+    // Invite 192.168.0.28:5006 after server starts
+    let invite_server = server.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let addr = std::net::SocketAddr::new("192.168.0.28".parse().unwrap(), 5006);
+        if let Err(e) = invite_server.invite_participant(addr).await {
+            info!("Failed to invite participant: {}", e);
+        } else {
+            info!("Invitation sent to 192.168.0.28:5006");
+        }
+    })
+    .await
+    .ok();
+
+    // Wait for the server task to complete (keeps process alive)
+    let _ = server_task.await;
 }
 
 fn handle_midi_packet(data: &MidiPacket) {

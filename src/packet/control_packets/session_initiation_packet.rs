@@ -30,6 +30,15 @@ impl SessionInitiationPacket {
         })
     }
 
+    pub fn new_invitation(initiator_token: u32, sender_ssrc: u32, name: String) -> Self {
+        SessionInitiationPacket::Invitation(SessionInitiationPacketBody {
+            protocol_version: 2,
+            initiator_token,
+            sender_ssrc,
+            name: Some(name),
+        })
+    }
+
     pub fn read<R: Read>(reader: &mut R, command: &[u8]) -> std::io::Result<Self> {
         let body = SessionInitiationPacketBody::read(reader)?;
 
@@ -208,6 +217,23 @@ mod tests {
             assert_eq!(body.name, Some(name));
         } else {
             panic!("Expected Acknowledgment packet");
+        }
+    }
+
+    #[test]
+    fn test_new_invitation() {
+        let initiator_token = 0xF8D180E6;
+        let sender_ssrc = 0xF519AEB9;
+        let name = "Lovely Session".to_string();
+        let packet =
+            SessionInitiationPacket::new_invitation(initiator_token, sender_ssrc, name.clone());
+        if let SessionInitiationPacket::Invitation(body) = packet {
+            assert_eq!(body.protocol_version, 2);
+            assert_eq!(body.initiator_token, initiator_token);
+            assert_eq!(body.sender_ssrc, sender_ssrc);
+            assert_eq!(body.name, Some(name));
+        } else {
+            panic!("Expected Invitation packet");
         }
     }
 
