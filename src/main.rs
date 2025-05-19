@@ -1,10 +1,11 @@
 mod packet;
 mod rtp_midi_session;
+mod util;
 
 use std::sync::Arc;
 
 use log::info;
-use packet::midi_packet::{
+use packet::midi_packets::{
     midi_command::MidiCommand, midi_packet::MidiPacket, midi_timed_command::TimedCommand,
 };
 use rtp_midi_session::RtpMidiSession;

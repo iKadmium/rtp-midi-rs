@@ -8,12 +8,12 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task;
 
-use crate::packet::clock_sync_packet::ClockSyncPacket;
-use crate::packet::control_packet::ControlPacket;
-use crate::packet::midi_packet::midi_packet::MidiPacket;
-use crate::packet::midi_packet::midi_timed_command::TimedCommand;
+use crate::packet::control_packets::clock_sync_packet::ClockSyncPacket;
+use crate::packet::control_packets::control_packet::ControlPacket;
+use crate::packet::control_packets::session_initiation_packet::SessionInitiationPacket;
+use crate::packet::midi_packets::midi_packet::MidiPacket;
+use crate::packet::midi_packets::midi_timed_command::TimedCommand;
 use crate::packet::packet::RtpMidiPacket;
-use crate::packet::session_initiation_packet::SessionInitiationPacket;
 
 pub struct RtpMidiSession {
     name: String,
@@ -131,18 +131,41 @@ impl RtpMidiSession {
                             trace!("Control: Parsed packet: {:?}", packet);
                             match packet {
                                 ControlPacket::SessionInitiation(session_initiation_packet) => {
-                                    info!("Control: Received session initiation from {}", src);
-                                    Self::send_invitation_response(
-                                        &socket, // Pass &socket (Arc derefs to UdpSocket)
-                                        src,
-                                        ssrc,
-                                        session_initiation_packet.initiator_token,
-                                        &name,
-                                    )
-                                    .await;
-                                }
-                                ControlPacket::EndSession => {
-                                    Self::handle_end_session(src, &participants);
+                                    match session_initiation_packet {
+                                        SessionInitiationPacket::Invitation(invitaiton) => {
+                                            info!(
+                                                "Control: Received session initiation from {}",
+                                                src
+                                            );
+                                            Self::send_invitation_response(
+                                                &socket, // Pass &socket (Arc derefs to UdpSocket)
+                                                src,
+                                                ssrc,
+                                                invitaiton.initiator_token,
+                                                &name,
+                                            )
+                                            .await;
+                                        }
+                                        SessionInitiationPacket::Acknowledgment(_) => {
+                                            info!(
+                                                "Control: Received session acknowledgment from {}",
+                                                src
+                                            );
+                                        }
+                                        SessionInitiationPacket::Rejection(_) => {
+                                            info!(
+                                                "Control: Received session rejection from {}",
+                                                src
+                                            );
+                                        }
+                                        SessionInitiationPacket::Termination(_) => {
+                                            info!(
+                                                "Control: Received session termination from {}",
+                                                src
+                                            );
+                                            Self::handle_end_session(src, &participants);
+                                        }
+                                    }
                                 }
                                 _ => {
                                     warn!("Control: Unhandled control packet: {:?}", packet);
@@ -183,15 +206,28 @@ impl RtpMidiSession {
                             match packet {
                                 RtpMidiPacket::Control(control_packet) => match control_packet {
                                     ControlPacket::SessionInitiation(session_initiation_packet) => {
-                                        debug!("MIDI: Received session initiation from {}", src);
-                                        Self::send_invitation_response(
-                                            &socket, // Pass &socket (Arc derefs to UdpSocket)
-                                            src,
-                                            ssrc,
-                                            session_initiation_packet.initiator_token,
-                                            &server_name,
-                                        )
-                                        .await;
+                                        match session_initiation_packet {
+                                            SessionInitiationPacket::Invitation(invitation) => {
+                                                info!(
+                                                    "MIDI: Received session invitation from {}",
+                                                    src
+                                                );
+                                                Self::send_invitation_response(
+                                                    &socket, // Pass &socket (Arc derefs to UdpSocket)
+                                                    src,
+                                                    ssrc,
+                                                    invitation.initiator_token,
+                                                    &server_name,
+                                                )
+                                                .await;
+                                            }
+                                            _ => {
+                                                warn!(
+                                                    "MIDI: Unhandled session initiation packet {:?}",
+                                                    session_initiation_packet
+                                                );
+                                            }
+                                        }
                                     }
                                     ControlPacket::ClockSync(clock_sync_packet) => {
                                         debug!("MIDI: Received clock sync from {}", src);
@@ -245,16 +281,14 @@ impl RtpMidiSession {
         initiator_token: u32,
         name: &str,
     ) {
-        let response_packet = SessionInitiationPacket {
-            command: *b"OK",
-            protocol_version: 2,
+        let response_packet = SessionInitiationPacket::new_acknowledgment(
             initiator_token,
             sender_ssrc,
-            name: Some(name.to_string()),
-        };
+            name.to_string(),
+        );
 
-        let mut response_bytes = vec![0; response_packet.size()];
-        response_packet.write_to_bytes(&mut response_bytes).unwrap();
+        let mut response_bytes = Vec::new();
+        response_packet.write(&mut response_bytes).unwrap();
 
         if let Err(e) = socket.send_to(&response_bytes, src).await {
             error!(
@@ -299,8 +333,8 @@ impl RtpMidiSession {
                 let response_packet =
                     ClockSyncPacket::new(1, [packet.timestamps[0], timestamp2, 0], ssrc);
 
-                let mut response_bytes = [0; ClockSyncPacket::SIZE];
-                response_packet.write_to_bytes(&mut response_bytes).unwrap();
+                let mut response_bytes = Vec::new();
+                response_packet.write(&mut response_bytes).unwrap();
 
                 if let Err(e) = socket.send_to(&response_bytes, src).await {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
@@ -352,8 +386,8 @@ impl RtpMidiSession {
             commands,
         );
         *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
-        let mut data = vec![0u8; packet.size(false)];
-        packet.write_to_bytes(&mut data, false)?;
+        let mut data = Vec::new();
+        packet.write(&mut data, false)?;
 
         info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {

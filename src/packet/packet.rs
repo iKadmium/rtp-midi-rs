@@ -1,4 +1,6 @@
-use super::{control_packet::ControlPacket, midi_packet::midi_packet::MidiPacket};
+use super::{
+    control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket,
+};
 
 #[derive(Debug)]
 pub enum RtpMidiPacket {

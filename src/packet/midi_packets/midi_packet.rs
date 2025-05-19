@@ -1,12 +1,12 @@
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 
 use log::trace;
 
-use crate::packet::midi_packet::midi_command_list_header::MidiCommandListHeader;
-
 use super::{
-    midi_command_list_body::MidiCommandListBody, midi_command_list_header::MidiCommandListFlags,
-    midi_packet_header::MidiPacketHeader, midi_timed_command::TimedCommand,
+    midi_command_list_body::MidiCommandListBody,
+    midi_command_list_header::{MidiCommandListFlags, MidiCommandListHeader},
+    midi_packet_header::MidiPacketHeader,
+    midi_timed_command::TimedCommand,
 };
 
 #[derive(Debug)]
@@ -27,31 +27,31 @@ impl MidiPacket {
     }
 
     pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
-        let mut i = 0;
-        let header_bytes = &bytes[0..size_of::<MidiPacketHeader>()];
-        let header = MidiPacketHeader::from_be_bytes(header_bytes)?;
-        i += size_of::<MidiPacketHeader>();
+        let mut reader = Cursor::new(bytes);
+
+        let header = MidiPacketHeader::read(&mut reader)?;
         trace!("Parsed header: {:#?}", header);
 
-        let command_section_header = MidiCommandListHeader::from_be_bytes(
-            &bytes[i..i + MidiCommandListHeader::MAX_HEADER_SIZE],
-        )?;
-        i += MidiCommandListHeader::size(command_section_header.flags().b_flag());
+        let command_section_header = MidiCommandListHeader::read(&mut reader)?;
 
-        let command_section_bytes = &bytes[i..i + command_section_header.length()];
-        let command_section = MidiCommandListBody::from_be_bytes(
-            command_section_bytes,
+        let command_section_start = reader.position() as usize;
+        let command_section_end = command_section_start + command_section_header.length() as usize;
+        let mut command_section_cursor =
+            Cursor::new(&bytes[command_section_start..command_section_end]);
+
+        let command_section = MidiCommandListBody::read(
+            &mut command_section_cursor,
             command_section_header.flags().z_flag(),
         )?;
         trace!("Parsed command section: {:#?}", command_section);
 
-        let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
-            let journal_bytes = &bytes[i..];
-            //Some(RecoveryJournal::from_be_bytes(journal_bytes)?)
-            None // Placeholder for recovery journal parsing
-        } else {
-            None
-        };
+        // let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
+        //     let journal_bytes = &bytes[i..];
+        //     //Some(RecoveryJournal::from_be_bytes(journal_bytes)?)
+        //     None // Placeholder for recovery journal parsing
+        // } else {
+        //     None
+        // };
 
         Ok(Self {
             header,
@@ -60,15 +60,12 @@ impl MidiPacket {
         })
     }
 
-    pub fn write_to_bytes(&self, bytes: &mut [u8], z_flag: bool) -> Result<usize, std::io::Error> {
-        let mut bytes_written = self.header.write_to_bytes(bytes)?;
-
+    pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> std::io::Result<usize> {
+        let mut bytes_written = self.header.write(writer)?;
         let command_section_header =
             MidiCommandListHeader::build_for(&self.command_list, false, z_flag, false);
-        bytes_written += command_section_header.write_to_bytes(&mut bytes[bytes_written..])?;
-        bytes_written += self
-            .command_list
-            .write_to_bytes(&mut bytes[bytes_written..], z_flag)?;
+        bytes_written += command_section_header.write(writer)?;
+        bytes_written += self.command_list.write(writer, z_flag)?;
         Ok(bytes_written)
     }
 
@@ -91,8 +88,8 @@ impl MidiPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::midi_packet::midi_command::MidiCommand;
-    use crate::packet::midi_packet::midi_timed_command::TimedCommand;
+    use crate::packet::midi_packets::midi_command::MidiCommand;
+    use crate::packet::midi_packets::midi_timed_command::TimedCommand;
 
     #[test]
     fn test_midi_packet() {
@@ -110,7 +107,7 @@ mod tests {
         let packet = MidiPacket::new(sequence_number, timestamp, ssrc, &[timed_command]);
 
         let mut bytes = vec![0; packet.size(false)];
-        packet.write_to_bytes(&mut bytes, false).unwrap();
+        packet.write(&mut Cursor::new(&mut bytes), false).unwrap();
 
         let parsed_packet = MidiPacket::from_be_bytes(&bytes).unwrap();
 

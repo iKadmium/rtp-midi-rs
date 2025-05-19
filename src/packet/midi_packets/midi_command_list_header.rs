@@ -1,3 +1,6 @@
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
+
 use super::midi_command_list_body::MidiCommandListBody;
 
 pub struct MidiCommandListHeader {
@@ -60,16 +63,12 @@ impl MidiCommandListFlags {
         size > 0x0F
     }
 
-    pub fn from_be_bytes(bytes: &[u8]) -> Self {
-        MidiCommandListFlags {
-            flags: bytes[0] & 0xF0,
-        }
+    pub fn from_u8(byte: u8) -> Self {
+        MidiCommandListFlags { flags: byte & 0xF0 }
     }
 }
 
 impl MidiCommandListHeader {
-    pub const MAX_HEADER_SIZE: usize = 2;
-
     pub fn new(flags: MidiCommandListFlags, length: usize) -> Self {
         MidiCommandListHeader { flags, length }
     }
@@ -97,31 +96,38 @@ impl MidiCommandListHeader {
         Self::new(flags, length)
     }
 
-    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> std::io::Result<usize> {
-        if self.length > 0x0F {
-            // If length > 0x0F, use 12 bits for length and 4 bits for flags
+    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
+        if self.flags.b_flag() {
+            // If b_flag is set, use 12 bits for length and 4 bits for flags
             // Set the high bit to indicate extended length
             let flags_and_length: u16 =
                 0x8000 | ((self.flags.flags as u16) << 8) | ((self.length as u16) & 0x0FFF);
-            bytes[0..2].copy_from_slice(&flags_and_length.to_be_bytes());
+            writer.write_u16::<BigEndian>(flags_and_length)?;
             Ok(2)
         } else {
             // Otherwise, use 4 bits for length and 4 bits for flags
             let flags_and_length: u8 = (self.flags.flags) | ((self.length as u8) & 0x000F);
-            bytes[0] = flags_and_length;
+            writer.write_u8(flags_and_length)?;
             Ok(1)
         }
     }
 
-    pub fn from_be_bytes(bytes: &[u8]) -> std::io::Result<Self> {
-        let flags = MidiCommandListFlags::from_be_bytes(bytes);
+    pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+        let first_byte = reader.read_u8()?;
+        let flags = MidiCommandListFlags::from_u8(first_byte);
         let result = if flags.b_flag() {
-            let length_msb = bytes[0] & 0x0F;
-            let length_lsb = bytes[1];
-            let length = u16::from_be_bytes([length_msb, length_lsb]) as usize;
-            Self { flags, length }
+            let length_lsb = reader.read_u8()?;
+            // Correctly reconstruct the 12-bit length from the two bytes
+            // The first byte contains the 4 flag bits and the 4 MSBs of the length.
+            // The second byte contains the 8 LSBs of the length.
+            // So, length = ((first_byte & 0x0F) << 8) | length_lsb
+            let length = (((first_byte & 0x0F) as u16) << 8) | (length_lsb as u16);
+            Self {
+                flags,
+                length: length as usize,
+            }
         } else {
-            let length = (bytes[0] & 0x0F) as usize;
+            let length = (first_byte & 0x0F) as usize;
             Self { flags, length }
         };
 

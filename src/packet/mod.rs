@@ -1,5 +1,3 @@
-pub mod clock_sync_packet;
-pub mod control_packet;
-pub mod midi_packet;
+pub mod control_packets;
+pub mod midi_packets;
 pub mod packet;
-pub mod session_initiation_packet;

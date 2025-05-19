@@ -1,3 +1,7 @@
+use byteorder::ReadBytesExt;
+use byteorder::WriteBytesExt;
+use std::io::{Read, Write};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 #[allow(dead_code)]
@@ -62,103 +66,96 @@ impl MidiCommand {
         }
     }
 
-    pub fn from_be_bytes(
-        bytes: &[u8],
+    pub fn size_from_status(status: u8) -> usize {
+        match status & 0xF0 {
+            0x80 => 2, // Note Off
+            0x90 => 2, // Note On
+            0xA0 => 2, // Polyphonic Key Pressure
+            0xB0 => 2, // Control Change
+            0xC0 => 1, // Program Change
+            0xD0 => 1, // Channel Pressure
+            0xE0 => 2, // Pitch Bend
+            _ => 0,
+        }
+    }
+
+    pub fn read<R: Read>(
+        reader: &mut R,
         running_status: Option<u8>,
-    ) -> Result<(Self, usize), std::io::Error> {
-        let mut bytes_read = 0;
-        let status = if bytes[bytes_read] & 0x80 == 0 {
+    ) -> Result<Self, std::io::Error> {
+        let first_byte = reader.read_u8()?;
+        let mut data: [u8; 2] = [0; 2];
+
+        let (status, data_bytes_read) = if first_byte & 0x80 == 0 {
             match running_status {
-                Some(status) => status,
+                Some(rs) => {
+                    data[0] = first_byte;
+                    (rs, 1)
+                }
                 None => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "No status bit and running status is not set",
+                        "No status with no running status byte",
                     ));
                 }
             }
         } else {
-            bytes_read += 1;
-            bytes[bytes_read - 1]
+            (first_byte, 0)
         };
         let channel = status & 0x0F;
-        let command_type = status & 0xF0;
-        let (cmd, data_len) = match command_type {
-            0x80 => {
-                let key = bytes[bytes_read];
-                let velocity = bytes[bytes_read + 1];
-                (
-                    MidiCommand::NoteOff {
-                        channel,
-                        key,
-                        velocity,
-                    },
-                    2,
-                )
-            }
-            0x90 => {
-                let key = bytes[bytes_read];
-                let velocity = bytes[bytes_read + 1];
-                (
-                    MidiCommand::NoteOn {
-                        channel,
-                        key,
-                        velocity,
-                    },
-                    2,
-                )
-            }
-            0xA0 => {
-                let key = bytes[bytes_read];
-                let pressure = bytes[bytes_read + 1];
-                (
-                    MidiCommand::PolyphonicKeyPressure {
-                        channel,
-                        key,
-                        pressure,
-                    },
-                    2,
-                )
-            }
-            0xB0 => {
-                let controller = bytes[bytes_read];
-                let value = bytes[bytes_read + 1];
-                (
-                    MidiCommand::ControlChange {
-                        channel,
-                        controller,
-                        value,
-                    },
-                    2,
-                )
-            }
-            0xC0 => {
-                let program = bytes[bytes_read];
-                (MidiCommand::ProgramChange { channel, program }, 1)
-            }
-            0xD0 => {
-                let pressure = bytes[bytes_read];
-                (MidiCommand::ChannelPressure { channel, pressure }, 1)
-            }
-            0xE0 => {
-                let lsb = bytes[bytes_read];
-                let msb = bytes[bytes_read + 1];
-                (MidiCommand::PitchBend { channel, lsb, msb }, 2)
-            }
+        let size = MidiCommand::size_from_status(status);
+        for i in data_bytes_read..size {
+            data[i] = reader.read_u8()?;
+        }
+
+        let command = match status & 0xF0 {
+            0x80 => MidiCommand::NoteOff {
+                channel,
+                key: data[0],
+                velocity: data[1],
+            },
+            0x90 => MidiCommand::NoteOn {
+                channel,
+                key: data[0],
+                velocity: data[1],
+            },
+            0xA0 => MidiCommand::PolyphonicKeyPressure {
+                channel,
+                key: data[0],
+                pressure: data[1],
+            },
+            0xB0 => MidiCommand::ControlChange {
+                channel,
+                controller: data[0],
+                value: data[1],
+            },
+            0xC0 => MidiCommand::ProgramChange {
+                channel,
+                program: data[0],
+            },
+            0xD0 => MidiCommand::ChannelPressure {
+                channel,
+                pressure: data[0],
+            },
+            0xE0 => MidiCommand::PitchBend {
+                channel,
+                lsb: data[0],
+                msb: data[1],
+            },
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "Invalid MIDI command type",
+                    "Invalid MIDI command",
                 ));
             }
         };
-        bytes_read += data_len;
-        Ok((cmd, bytes_read))
+
+        Ok(command)
     }
 
-    pub fn write_to_bytes(
+    pub fn write<W: Write>(
         &self,
-        bytes: &mut [u8],
+        writer: &mut W,
         running_status: Option<u8>,
     ) -> Result<usize, std::io::Error> {
         let mut bytes_written = 0;
@@ -168,39 +165,39 @@ impl MidiCommand {
             None => true,
         };
         if write_status {
-            bytes[bytes_written] = status;
+            writer.write_u8(status)?;
             bytes_written += 1;
         }
         match self {
             MidiCommand::NoteOff { key, velocity, .. }
             | MidiCommand::NoteOn { key, velocity, .. } => {
-                bytes[bytes_written] = *key;
-                bytes[bytes_written + 1] = *velocity;
+                writer.write_u8(*key)?;
+                writer.write_u8(*velocity)?;
                 bytes_written += 2;
             }
             MidiCommand::PolyphonicKeyPressure { key, pressure, .. } => {
-                bytes[bytes_written] = *key;
-                bytes[bytes_written + 1] = *pressure;
+                writer.write_u8(*key)?;
+                writer.write_u8(*pressure)?;
                 bytes_written += 2;
             }
             MidiCommand::ControlChange {
                 controller, value, ..
             } => {
-                bytes[bytes_written] = *controller;
-                bytes[bytes_written + 1] = *value;
+                writer.write_u8(*controller)?;
+                writer.write_u8(*value)?;
                 bytes_written += 2;
             }
             MidiCommand::ProgramChange { program, .. } => {
-                bytes[bytes_written] = *program;
+                writer.write_u8(*program)?;
                 bytes_written += 1;
             }
             MidiCommand::ChannelPressure { pressure, .. } => {
-                bytes[bytes_written] = *pressure;
+                writer.write_u8(*pressure)?;
                 bytes_written += 1;
             }
             MidiCommand::PitchBend { lsb, msb, .. } => {
-                bytes[bytes_written] = *lsb;
-                bytes[bytes_written + 1] = *msb;
+                writer.write_u8(*lsb)?;
+                writer.write_u8(*msb)?;
                 bytes_written += 2;
             }
         }
@@ -210,6 +207,8 @@ impl MidiCommand {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -237,9 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn test_midi_command_from_bytes_with_status_byte() {
-        let bytes: [u8; 4] = [0x94, 0x40, 0x7F, 0x00];
-        let (command, bytes_read) = MidiCommand::from_be_bytes(&bytes, None).unwrap();
+    fn test_midi_command_read_with_status_byte() {
+        let bytes: Vec<u8> = vec![0x94u8, 0x40, 0x7F, 0x00];
+        let mut reader = Cursor::new(bytes);
+        let command = MidiCommand::read(&mut reader, None).unwrap();
         assert_eq!(command.status(), 0x94);
         if let MidiCommand::NoteOn { key, velocity, .. } = command {
             assert_eq!(key, 0x40);
@@ -247,14 +247,13 @@ mod tests {
         } else {
             panic!("Not a NoteOn command");
         }
-        assert_eq!(bytes_read, 3);
     }
 
     #[test]
     fn test_midi_command_from_bytes_without_status_byte() {
-        let bytes: [u8; 3] = [0x40, 0x7F, 0x00];
-        let running_status = Some(0x94);
-        let (command, bytes_read) = MidiCommand::from_be_bytes(&bytes, running_status).unwrap();
+        let bytes = vec![0x40u8, 0x7F, 0x00];
+        let mut reader = Cursor::new(bytes);
+        let command = MidiCommand::read(&mut reader, Some(0x94)).unwrap();
         assert_eq!(command.status(), 0x94);
         if let MidiCommand::NoteOn { key, velocity, .. } = command {
             assert_eq!(key, 0x40);
@@ -262,18 +261,17 @@ mod tests {
         } else {
             panic!("Not a NoteOn command");
         }
-        assert_eq!(bytes_read, 2);
     }
 
     #[test]
-    fn test_midi_command_write_to_bytes() {
+    fn test_midi_command_write() {
         let command = MidiCommand::NoteOn {
             channel: 4,
             key: 0x40,
             velocity: 0x7F,
         };
-        let mut bytes = [0u8; 4];
-        let bytes_written = command.write_to_bytes(&mut bytes, None).unwrap();
+        let mut bytes = Vec::new();
+        let bytes_written = command.write(&mut bytes, None).unwrap();
         assert_eq!(bytes_written, 3);
         assert_eq!(bytes[..3], [0x94, 0x40, 0x7F]);
     }
@@ -285,11 +283,10 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        let mut bytes = [0u8; 4];
-        let bytes_written = original_command.write_to_bytes(&mut bytes, None).unwrap();
-        let (deserialized_command, bytes_read) =
-            MidiCommand::from_be_bytes(&bytes[..bytes_written], None).unwrap();
+        let mut bytes = Vec::new();
+        let _ = original_command.write(&mut bytes, None).unwrap();
+        let mut reader = Cursor::new(&bytes);
+        let deserialized_command = MidiCommand::read(&mut reader, None).unwrap();
         assert_eq!(original_command, deserialized_command);
-        assert_eq!(bytes_written, bytes_read);
     }
 }

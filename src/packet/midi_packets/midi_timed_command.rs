@@ -1,4 +1,5 @@
 use log::trace;
+use std::io::{Read, Write};
 
 use super::{delta_time::DeltaTime, midi_command::MidiCommand};
 
@@ -24,52 +25,40 @@ impl TimedCommand {
         &self.command
     }
 
-    pub fn from_be_bytes(
-        bytes: &[u8],
+    pub fn read<R: Read>(
+        reader: &mut R,
         running_status: Option<u8>,
         has_delta_time: bool,
-    ) -> Result<(Self, usize), std::io::Error> {
-        trace!("Parsing TimedCommand from bytes, {:x?}", bytes);
-        let mut bytes_read = 0;
+    ) -> Result<Self, std::io::Error> {
+        trace!("Parsing TimedCommand from reader");
         let delta_time = if has_delta_time {
-            let delta_time = DeltaTime::from_be_bytes(bytes)?;
-            bytes_read += delta_time.size();
-            Some(delta_time)
+            Some(DeltaTime::read(reader)?)
         } else {
             None
         };
-
-        let (command, length) = MidiCommand::from_be_bytes(&bytes[bytes_read..], running_status)?;
-        bytes_read += length;
-
-        Ok((
-            TimedCommand {
-                delta_time,
-                command,
-            },
-            bytes_read,
-        ))
+        let command = MidiCommand::read(reader, running_status)?;
+        Ok(TimedCommand {
+            delta_time,
+            command,
+        })
     }
 
-    pub fn write_to_bytes(
+    pub fn write<W: Write>(
         &self,
-        bytes: &mut [u8],
+        writer: &mut W,
         running_status: Option<u8>,
         write_delta_time: bool,
     ) -> Result<usize, std::io::Error> {
         let mut bytes_written = 0;
 
         if write_delta_time {
-            if let Some(ref delta_time) = self.delta_time {
-                bytes_written += delta_time.write_to_bytes(&mut bytes[bytes_written..])?;
-            } else {
-                bytes_written += DeltaTime::zero().write_to_bytes(&mut bytes[bytes_written..])?;
+            match self.delta_time {
+                Some(ref dt) => bytes_written += dt.write(writer)?,
+                None => bytes_written += DeltaTime::zero().write(writer)?,
             }
         }
 
-        bytes_written += self
-            .command
-            .write_to_bytes(&mut bytes[bytes_written..], running_status)?;
+        bytes_written += self.command.write(writer, running_status)?;
 
         Ok(bytes_written)
     }
@@ -77,6 +66,8 @@ impl TimedCommand {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -97,67 +88,72 @@ mod tests {
     }
 
     #[test]
-    fn test_timed_command_from_bytes_with_delta_time() {
-        let bytes: [u8; 5] = [0x00, 0x90, 0x40, 0x7F, 0x00];
-
-        let delta_time = DeltaTime::from_be_bytes(&bytes[0..1]).unwrap();
-        let (command, _command_bytes_read) = MidiCommand::from_be_bytes(&bytes[1..], None).unwrap();
-
-        let (timed_command, timed_bytes_read) =
-            TimedCommand::from_be_bytes(&bytes, None, true).unwrap();
-
-        assert_eq!(timed_command.command(), &command);
-        assert_eq!(timed_command.delta_time(), Some(&delta_time));
-        assert_eq!(timed_bytes_read, 4);
-    }
-
-    #[test]
-    fn test_timed_command_from_bytes_without_delta_time() {
-        let bytes: [u8; 4] = [0x90, 0x40, 0x7F, 0x00];
-
-        let (command, _command_bytes_read) = MidiCommand::from_be_bytes(&bytes[0..], None).unwrap();
-
-        let (timed_command, timed_bytes_read) =
-            TimedCommand::from_be_bytes(&bytes, None, false).unwrap();
-
-        assert_eq!(timed_command.command(), &command);
-        assert_eq!(timed_command.delta_time(), None);
-        assert_eq!(timed_bytes_read, 3);
-    }
-
-    #[test]
-    fn test_timed_command_write_to_bytes() {
-        let mut expected_bytes = vec![0; 10];
-        let mut expected_bytes_written = 0;
-
-        let delta_time = DeltaTime::new(0x123456);
-        expected_bytes_written += delta_time.write_to_bytes(&mut expected_bytes).unwrap();
+    fn test_timed_command_read_with_delta_time() {
+        let mut bytes = Vec::<u8>::new();
         let command = MidiCommand::NoteOn {
             channel: 7,
             key: 0x40,
             velocity: 0x7F,
         };
-        expected_bytes_written += command
-            .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
-            .unwrap();
+        let delta_time = DeltaTime::new(0x123456);
+
+        delta_time.write(&mut bytes).unwrap();
+        command.write(&mut bytes, None).unwrap();
+
+        let mut cursor = Cursor::new(bytes);
+
+        let timed_command = TimedCommand::read(&mut cursor, None, true).unwrap();
+
+        assert_eq!(timed_command.command(), &command);
+        assert_eq!(timed_command.delta_time(), Some(&delta_time));
+    }
+
+    #[test]
+    fn test_timed_command_from_bytes_without_delta_time() {
+        let mut bytes = Vec::<u8>::new();
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
+
+        command.write(&mut bytes, None).unwrap();
+
+        let mut cursor = Cursor::new(bytes);
+
+        let timed_command = TimedCommand::read(&mut cursor, None, false).unwrap();
+
+        assert_eq!(timed_command.command(), &command);
+        assert_eq!(timed_command.delta_time(), None);
+    }
+
+    #[test]
+    fn test_timed_command_write() {
+        let mut expected_bytes = vec![0; 10];
+
+        let delta_time = DeltaTime::new(0x123456);
+        delta_time.write(&mut expected_bytes).unwrap();
+        let command = MidiCommand::NoteOn {
+            channel: 7,
+            key: 0x40,
+            velocity: 0x7F,
+        };
+        command.write(&mut expected_bytes, None).unwrap();
 
         let timed_command = TimedCommand {
             delta_time: Some(delta_time.clone()),
             command: command.clone(),
         };
 
-        let mut bytes = [0u8; 10];
-        let bytes_written = timed_command
-            .write_to_bytes(&mut bytes, None, true)
-            .unwrap();
+        let mut bytes = vec![0u8; 10];
+        let bytes_written = timed_command.write(&mut bytes, None, true).unwrap();
 
-        assert_eq!(bytes_written, expected_bytes_written);
         assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
     }
 
     #[test]
-    fn test_timed_command_write_to_bytes_without_delta_time() {
-        let mut expected_bytes = vec![0; 10];
+    fn test_timed_command_write_without_delta_time() {
+        let mut expected_bytes = Vec::<u8>::new();
         let mut expected_bytes_written = 0;
 
         let command = MidiCommand::NoteOn {
@@ -165,50 +161,42 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        expected_bytes_written += command
-            .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
-            .unwrap();
+        expected_bytes_written += command.write(&mut expected_bytes, None).unwrap();
 
         let timed_command = TimedCommand {
             delta_time: None,
             command: command.clone(),
         };
 
-        let mut bytes = [0u8; 10];
-        let bytes_written = timed_command
-            .write_to_bytes(&mut bytes, None, false)
-            .unwrap();
+        let mut bytes = Vec::<u8>::new();
+        let bytes_written = timed_command.write(&mut bytes, None, false).unwrap();
 
         assert_eq!(bytes_written, expected_bytes_written);
         assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
     }
 
     #[test]
-    fn test_timed_command_write_to_bytes_with_zero_delta_time() {
+    fn test_timed_command_write_with_zero_delta_time() {
         let mut expected_bytes = vec![0; 10];
         let mut expected_bytes_written = 0;
 
         let delta_time = DeltaTime::zero();
-        expected_bytes_written += delta_time.write_to_bytes(&mut expected_bytes).unwrap();
+        expected_bytes_written += delta_time.write(&mut expected_bytes).unwrap();
 
         let command = MidiCommand::NoteOn {
             channel: 7,
             key: 0x40,
             velocity: 0x7F,
         };
-        expected_bytes_written += command
-            .write_to_bytes(&mut expected_bytes[expected_bytes_written..], None)
-            .unwrap();
+        expected_bytes_written += command.write(&mut expected_bytes, None).unwrap();
 
         let timed_command = TimedCommand {
             delta_time: None,
             command: command.clone(),
         };
 
-        let mut bytes = [0u8; 10];
-        let bytes_written = timed_command
-            .write_to_bytes(&mut bytes, None, true)
-            .unwrap();
+        let mut bytes = vec![0u8; 10];
+        let bytes_written = timed_command.write(&mut bytes, None, true).unwrap();
 
         assert_eq!(bytes_written, expected_bytes_written);
         assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
@@ -227,15 +215,15 @@ mod tests {
             command: command.clone(),
         };
 
-        let mut bytes = [0u8; 10];
-        let bytes_written = original_timed_command
-            .write_to_bytes(&mut bytes, None, true)
+        let mut bytes = Vec::new();
+        let _bytes_written = original_timed_command
+            .write(&mut bytes, None, true)
             .unwrap();
 
-        let (deserialized_timed_command, bytes_read) =
-            TimedCommand::from_be_bytes(&bytes[..bytes_written], None, true).unwrap();
+        let mut cursor = Cursor::new(bytes);
+
+        let deserialized_timed_command = TimedCommand::read(&mut cursor, None, true).unwrap();
 
         assert_eq!(original_timed_command, deserialized_timed_command);
-        assert_eq!(bytes_written, bytes_read);
     }
 }

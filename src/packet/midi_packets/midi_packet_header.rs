@@ -1,3 +1,6 @@
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
+
 #[allow(dead_code)]
 pub struct MidiPacketHeader {
     flags: MidiPacketHeaderFlags, // 2 bits for version, 1 bit for p_flag, 1 bit for x_flag, 4 bits for cc, 1 bit for m_flag, 7 bits for pt
@@ -71,10 +74,6 @@ impl MidiPacketHeaderFlags {
     fn set_pt(&mut self, pt: u8) {
         self.flags = (self.flags & !(FlagMasks::PT as u16)) | (pt as u16);
     }
-
-    fn to_be_bytes(&self) -> [u8; 2] {
-        self.flags.to_be_bytes()
-    }
 }
 
 impl MidiPacketHeader {
@@ -102,40 +101,25 @@ impl MidiPacketHeader {
         self.ssrc
     }
 
-    pub fn flags(&self) -> &MidiPacketHeaderFlags {
-        &self.flags
-    }
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
+        let flags = MidiPacketHeaderFlags::from_u16(reader.read_u16::<BigEndian>()?);
+        let sequence_number = reader.read_u16::<BigEndian>()?;
+        let timestamp = reader.read_u32::<BigEndian>()?;
+        let ssrc = reader.read_u32::<BigEndian>()?;
 
-    pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
-        if bytes.len() < 12 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid header length",
-            ));
-        }
-
-        Ok(Self {
-            flags: MidiPacketHeaderFlags::from_u16(u16::from_be_bytes(
-                bytes[0..2].try_into().unwrap(),
-            )),
-            sequence_number: u16::from_be_bytes(bytes[2..4].try_into().unwrap()),
-            timestamp: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
-            ssrc: u32::from_be_bytes(bytes[8..12].try_into().unwrap()),
+        Ok(MidiPacketHeader {
+            flags,
+            sequence_number,
+            timestamp,
+            ssrc,
         })
     }
 
-    pub fn write_to_bytes(&self, bytes: &mut [u8]) -> Result<usize, std::io::Error> {
-        if bytes.len() < 12 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Invalid header length",
-            ));
-        }
-
-        bytes[0..2].copy_from_slice(&self.flags.to_be_bytes());
-        bytes[2..4].copy_from_slice(&self.sequence_number.to_be_bytes());
-        bytes[4..8].copy_from_slice(&self.timestamp.to_be_bytes());
-        bytes[8..12].copy_from_slice(&self.ssrc.to_be_bytes());
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+        writer.write_u16::<BigEndian>(self.flags.flags)?;
+        writer.write_u16::<BigEndian>(self.sequence_number)?;
+        writer.write_u32::<BigEndian>(self.timestamp)?;
+        writer.write_u32::<BigEndian>(self.ssrc)?;
 
         Ok(12)
     }

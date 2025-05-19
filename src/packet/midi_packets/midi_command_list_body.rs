@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+
 use log::trace;
 
 use super::midi_timed_command::TimedCommand;
@@ -45,32 +47,38 @@ impl MidiCommandListBody {
         &self.commands
     }
 
-    pub fn from_be_bytes(bytes: &[u8], z_flag: bool) -> Result<Self, std::io::Error> {
-        trace!("Parsing MIDI command list from bytes, {:#?}", bytes);
+    pub fn read<R: Read>(reader: &mut R, z_flag: bool) -> Result<Self, std::io::Error> {
+        trace!("Parsing MIDI command list from reader");
         let mut commands = Vec::new();
 
         let mut running_status: Option<u8> = None;
-
-        let mut offset = 0;
-        while offset < bytes.len() {
-            let read_delta_time = if offset == 0 { z_flag } else { true };
-            let (timed_command, bytes_read) =
-                TimedCommand::from_be_bytes(&bytes[offset..], running_status, read_delta_time)?;
-            running_status = Some(timed_command.command().status());
-            commands.push(timed_command);
-            offset += bytes_read;
+        let mut read_delta_time = z_flag;
+        loop {
+            match TimedCommand::read(reader, running_status, read_delta_time) {
+                Ok(timed_command) => {
+                    read_delta_time = true;
+                    running_status = Some(timed_command.command().status());
+                    commands.push(timed_command);
+                }
+                Err(e) => {
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                        break;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
 
         Ok(MidiCommandListBody { commands })
     }
 
-    pub fn write_to_bytes(&self, bytes: &mut [u8], z_flag: bool) -> Result<usize, std::io::Error> {
+    pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> Result<usize, std::io::Error> {
         let mut offset = 0;
         let mut running_status: Option<u8> = None;
         for command in &self.commands {
             let write_delta_time = if offset == 0 { z_flag } else { true };
-            let bytes_written =
-                command.write_to_bytes(&mut bytes[offset..], running_status, write_delta_time)?;
+            let bytes_written = command.write(writer, running_status, write_delta_time)?;
             running_status = Some(command.command().status());
             offset += bytes_written;
         }
