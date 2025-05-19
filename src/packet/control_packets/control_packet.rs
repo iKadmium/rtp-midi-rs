@@ -12,7 +12,9 @@ pub enum ControlPacket {
 }
 
 impl ControlPacket {
-    pub fn parse(buffer: &[u8]) -> std::io::Result<ControlPacket> {
+    pub(crate) const HEADER_SIZE: usize = 4;
+
+    pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
         if buffer.len() < 4 {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -56,5 +58,39 @@ impl ControlPacket {
 
     pub fn is_control_packet(buffer: &[u8]) -> bool {
         buffer.len() >= 4 && buffer[0] == 255 && buffer[1] == 255
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_invalid_control_packet() {
+        let data = vec![0, 0, 0, 0];
+        let result = ControlPacket::from_be_bytes(&data);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn test_parse_too_short_control_packet() {
+        let data = vec![255, 255, 67];
+        let result = ControlPacket::from_be_bytes(&data);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn test_write_header() {
+        let mut buffer = Vec::new();
+        let command = b"CK";
+        let result = ControlPacket::write_header(&mut buffer, &command);
+        assert!(result.is_ok());
+        assert_eq!(buffer, vec![255, 255, 67, 75]);
     }
 }

@@ -25,7 +25,7 @@ impl TimedCommand {
         &self.command
     }
 
-    pub fn read<R: Read>(
+    pub(super) fn read<R: Read>(
         reader: &mut R,
         running_status: Option<u8>,
         has_delta_time: bool,
@@ -43,7 +43,7 @@ impl TimedCommand {
         })
     }
 
-    pub fn write<W: Write>(
+    pub(super) fn write<W: Write>(
         &self,
         writer: &mut W,
         running_status: Option<u8>,

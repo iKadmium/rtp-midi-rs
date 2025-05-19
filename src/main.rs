@@ -1,15 +1,12 @@
-mod packet;
-mod rtp_midi_session;
-mod util;
-
 use std::sync::Arc;
 
 use log::info;
-use packet::midi_packets::{
+use rtpmidi::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+use tokio; // Add tokio runtime for async main
+
+use rtpmidi::packet::midi_packets::{
     midi_command::MidiCommand, midi_packet::MidiPacket, midi_timed_command::TimedCommand,
 };
-use rtp_midi_session::RtpMidiSession;
-use tokio; // Add tokio runtime for async main
 
 #[tokio::main]
 async fn main() {
@@ -22,11 +19,11 @@ async fn main() {
             .await
             .unwrap(),
     );
-    let server_clone = server.clone();
 
+    let server_clone = server.clone();
     server
-        .add_listener("midi_packet".to_string(), move |data| {
-            let server = server_clone.clone();
+        .add_listener(RtpMidiEventType::MidiPacket, move |data| {
+            let server_clone = server_clone.clone();
             tokio::spawn(async move {
                 handle_midi_packet(&data);
 
@@ -51,7 +48,7 @@ async fn main() {
                     .collect();
 
                 if !commands.is_empty() {
-                    match server.send_midi(&commands).await {
+                    match server_clone.send_midi_batch(&commands).await {
                         Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
                         Err(e) => info!("Error sending MIDI packet: {:?}", e),
                     };

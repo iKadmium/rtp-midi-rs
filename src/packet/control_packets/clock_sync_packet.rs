@@ -1,11 +1,9 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::{
-    fmt,
-    io::{Error, ErrorKind, Read, Write},
-};
+use std::io::{Read, Write};
 
 use super::control_packet::ControlPacket;
 
+#[derive(Debug)]
 pub struct ClockSyncPacket {
     pub count: u8,
     pub timestamps: [u64; 3],
@@ -38,11 +36,7 @@ impl ClockSyncPacket {
             timestamps[i] = reader.read_u64::<BigEndian>()?;
         }
 
-        Ok(ClockSyncPacket {
-            count,
-            timestamps,
-            sender_ssrc,
-        })
+        Ok(ClockSyncPacket::new(count, timestamps, sender_ssrc))
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
@@ -57,25 +51,13 @@ impl ClockSyncPacket {
     }
 }
 
-impl fmt::Debug for ClockSyncPacket {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ClockSyncPacket")
-            .field("count", &self.count)
-            .field("timestamps", &self.timestamps)
-            .field("sender_ssrc", &self.sender_ssrc)
-            .finish()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
-    fn test_parse_control_packet_0() {
+    fn test_read_control_packet_0() {
         let buffer = [
-            0xFF, 0xFF, 0x43, 0x4B, //header
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
             0x00, //count
             0x00, 0x00, 0x00, //reserved
@@ -84,21 +66,22 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // timestamp 3
         ]; // Example buffer for a ClockSync packet
 
-        let result = ControlPacket::parse(&buffer);
-        assert!(result.is_ok());
-        if let ControlPacket::ClockSync(packet) = result.unwrap() {
-            assert_eq!(packet.count, 0);
-            assert_eq!(packet.sender_ssrc, 4112101049);
-            assert_eq!(packet.timestamps[0], 1926546830);
-        } else {
-            panic!("Expected ClockSync packet");
-        }
+        let mut cursor = std::io::Cursor::new(buffer);
+
+        let result = ClockSyncPacket::read(&mut cursor);
+        match result {
+            Ok(packet) => {
+                assert_eq!(packet.count, 0);
+                assert_eq!(packet.sender_ssrc, 4112101049);
+                assert_eq!(packet.timestamps[0], 1926546830);
+            }
+            Err(e) => panic!("Failed to read ClockSync packet: {}", e),
+        };
     }
 
     #[test]
-    fn test_parse_control_packet_2() {
+    fn test_read_control_packet_2() {
         let buffer = [
-            0xFF, 0xFF, 0x43, 0x4B, //header
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
             0x02, //count
             0x00, 0x00, 0x00, //reserved
@@ -106,16 +89,47 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x04, 0x3D, 0xC7, 0xDF, // timestamp 2
             0x00, 0x00, 0x00, 0x00, 0x72, 0xD4, 0xC5, 0xCD, // timestamp 3
         ];
-        let result = ControlPacket::parse(&buffer);
+        let mut cursor = std::io::Cursor::new(buffer);
+
+        let result = ClockSyncPacket::read(&mut cursor);
+        match result {
+            Ok(packet) => {
+                assert_eq!(packet.count, 2);
+                assert_eq!(packet.sender_ssrc, 4112101049);
+                assert_eq!(packet.timestamps[0], 114);
+                assert_eq!(packet.timestamps[1], 71157727);
+                assert_eq!(packet.timestamps[2], 1926546893);
+            }
+            Err(e) => panic!("Failed to read ClockSync packet: {}", e),
+        };
+    }
+
+    #[test]
+    fn test_write_control_packet() {
+        let expected = [
+            0xFF, 0xFF, 0x43, 0x4B, //header
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+            0x02, //count
+            0x00, 0x00, 0x00, //reserved
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // timestamp 1
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // timestamp 2
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        ];
+        let packet = ClockSyncPacket::new(2, [1, 2, 3], 4112101049);
+        let mut buffer = Vec::new();
+        let result = packet.write(&mut buffer);
         assert!(result.is_ok());
-        if let ControlPacket::ClockSync(packet) = result.unwrap() {
-            assert_eq!(packet.count, 2);
-            assert_eq!(packet.sender_ssrc, 4112101049);
-            assert_eq!(packet.timestamps[0], 114);
-            assert_eq!(packet.timestamps[1], 71157727);
-            assert_eq!(packet.timestamps[2], 1926546893);
-        } else {
-            panic!("Expected ClockSync packet");
-        }
+        assert_eq!(buffer.len(), ClockSyncPacket::SIZE);
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn test_new() {
+        let packet = ClockSyncPacket::new(2, [1, 2, 3], 4112101049);
+        assert_eq!(packet.count, 2);
+        assert_eq!(packet.sender_ssrc, 4112101049);
+        assert_eq!(packet.timestamps[0], 1);
+        assert_eq!(packet.timestamps[1], 2);
+        assert_eq!(packet.timestamps[2], 3);
     }
 }

@@ -1,6 +1,7 @@
 use log::{debug, error, info, trace, warn};
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
+use std::io::Cursor; // Added import for Cursor
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,6 +12,7 @@ use tokio::task;
 use crate::packet::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packets::control_packet::ControlPacket;
 use crate::packet::control_packets::session_initiation_packet::SessionInitiationPacket;
+use crate::packet::midi_packets::midi_command::MidiCommand;
 use crate::packet::midi_packets::midi_packet::MidiPacket;
 use crate::packet::midi_packets::midi_timed_command::TimedCommand;
 use crate::packet::packet::RtpMidiPacket;
@@ -19,11 +21,16 @@ pub struct RtpMidiSession {
     name: String,
     ssrc: u32,
     start_time: Instant, // Added start_time
-    listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
+    listeners: Arc<Mutex<HashMap<RtpMidiEventType, Box<dyn Fn(MidiPacket) + Send>>>>,
     participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     sequence_number: Arc<Mutex<u16>>,
     midi_socket: Arc<UdpSocket>,
     control_socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RtpMidiEventType {
+    MidiPacket,
 }
 
 impl RtpMidiSession {
@@ -40,12 +47,12 @@ impl RtpMidiSession {
         })
     }
 
-    pub async fn add_listener<F>(&self, event_name: String, callback: F)
+    pub async fn add_listener<F>(&self, event_type: RtpMidiEventType, callback: F)
     where
         F: Fn(MidiPacket) + Send + 'static,
     {
         let mut listeners = self.listeners.lock().await;
-        listeners.insert(event_name, Box::new(callback));
+        listeners.insert(event_type, Box::new(callback));
     }
 
     pub async fn start(&self) -> std::io::Result<()> {
@@ -126,7 +133,7 @@ impl RtpMidiSession {
                 // Use socket directly
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
-                    match ControlPacket::parse(&buf[..amt]) {
+                    match ControlPacket::from_be_bytes(&buf[..amt]) {
                         Ok(packet) => {
                             trace!("Control: Parsed packet: {:?}", packet);
                             match packet {
@@ -189,7 +196,7 @@ impl RtpMidiSession {
         socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
         server_name: String,
         ssrc: u32,
-        listeners: Arc<Mutex<HashMap<String, Box<dyn Fn(MidiPacket) + Send>>>>,
+        listeners: Arc<Mutex<HashMap<RtpMidiEventType, Box<dyn Fn(MidiPacket) + Send>>>>,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         session_seq: Arc<Mutex<u16>>,
         start_time: Instant, // Added start_time parameter
@@ -241,12 +248,6 @@ impl RtpMidiSession {
                                         )
                                         .await;
                                     }
-                                    _ => {
-                                        debug!(
-                                            "MIDI: Received control packet: {:?}",
-                                            control_packet
-                                        );
-                                    }
                                 },
                                 RtpMidiPacket::Midi(midi_packet) => {
                                     debug!("MIDI: Parsed MIDI packet: {:#?}", midi_packet);
@@ -254,7 +255,7 @@ impl RtpMidiSession {
                                     let mut seq = session_seq.lock().await;
                                     *seq = midi_packet.sequence_number().wrapping_add(1);
                                     if let Some(callback) =
-                                        listeners.lock().await.get("midi_packet")
+                                        listeners.lock().await.get(&RtpMidiEventType::MidiPacket)
                                     {
                                         callback(midi_packet);
                                     }
@@ -287,7 +288,7 @@ impl RtpMidiSession {
             name.to_string(),
         );
 
-        let mut response_bytes = Vec::new();
+        let mut response_bytes = vec![0u8; response_packet.size()];
         response_packet.write(&mut response_bytes).unwrap();
 
         if let Err(e) = socket.send_to(&response_bytes, src).await {
@@ -333,8 +334,9 @@ impl RtpMidiSession {
                 let response_packet =
                     ClockSyncPacket::new(1, [packet.timestamps[0], timestamp2, 0], ssrc);
 
-                let mut response_bytes = Vec::new();
-                response_packet.write(&mut response_bytes).unwrap();
+                let mut response_bytes = vec![0u8; ClockSyncPacket::SIZE];
+                let mut cursor = Cursor::new(&mut response_bytes);
+                response_packet.write(&mut cursor).unwrap();
 
                 if let Err(e) = socket.send_to(&response_bytes, src).await {
                     error!("MIDI: Failed to send clock sync response to {}: {}", src, e);
@@ -376,7 +378,7 @@ impl RtpMidiSession {
         participants.keys().cloned().collect()
     }
 
-    pub async fn send_midi(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
+    pub async fn send_midi_batch(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
         let participants = self.all_participants().await;
         let mut seq = self.sequence_number.lock().await;
         let packet = MidiPacket::new(
@@ -386,8 +388,31 @@ impl RtpMidiSession {
             commands,
         );
         *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
-        let mut data = Vec::new();
-        packet.write(&mut data, false)?;
+        let mut data = vec![0u8; packet.size(false)]; // Allocate buffer for packet
+        let mut cursor = Cursor::new(&mut data);
+        packet.write(&mut cursor, false)?;
+
+        info!("Sending MIDI packet batch to {:?}", participants);
+        for addr in participants {
+            self.midi_socket.send_to(&data, addr).await?; // Use self.midi_socket directly
+        }
+        Ok(())
+    }
+
+    pub async fn send_midi(&self, command: &MidiCommand) -> std::io::Result<()> {
+        let participants = self.all_participants().await;
+        let mut seq = self.sequence_number.lock().await;
+        let commands = vec![TimedCommand::new(None, command.clone())];
+        let packet = MidiPacket::new(
+            *seq,                                            // Sequence number
+            Self::current_timestamp(self.start_time) as u32, // Timestamp relative to start_time
+            self.ssrc,
+            &commands,
+        );
+        *seq = seq.wrapping_add(1); // Increment sequence number, wrapping on overflow
+        let mut data = vec![0u8; packet.size(false)]; // Allocate buffer for packet
+        let mut cursor = Cursor::new(&mut data);
+        packet.write(&mut cursor, false)?;
 
         info!("Sending MIDI packet to {:?}", participants);
         for addr in participants {

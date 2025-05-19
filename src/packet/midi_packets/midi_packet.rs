@@ -18,7 +18,12 @@ pub struct MidiPacket {
 }
 
 impl MidiPacket {
-    pub fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &[TimedCommand]) -> Self {
+    pub(crate) fn new(
+        sequence_number: u16,
+        timestamp: u32,
+        ssrc: u32,
+        commands: &[TimedCommand],
+    ) -> Self {
         MidiPacket {
             header: MidiPacketHeader::new(sequence_number, timestamp, ssrc),
             command_list: MidiCommandListBody::new(commands),
@@ -26,7 +31,7 @@ impl MidiPacket {
         }
     }
 
-    pub fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+    pub(in crate::packet) fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
         let mut reader = Cursor::new(bytes);
 
         let header = MidiPacketHeader::read(&mut reader)?;
@@ -60,7 +65,7 @@ impl MidiPacket {
         })
     }
 
-    pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> std::io::Result<usize> {
+    pub(crate) fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> std::io::Result<usize> {
         let mut bytes_written = self.header.write(writer)?;
         let command_section_header =
             MidiCommandListHeader::build_for(&self.command_list, false, z_flag, false);
@@ -69,7 +74,7 @@ impl MidiPacket {
         Ok(bytes_written)
     }
 
-    pub fn size(&self, z_flag: bool) -> usize {
+    pub(crate) fn size(&self, z_flag: bool) -> usize {
         let command_section_size = self.command_list.size(z_flag);
         let needs_b_flag = MidiCommandListFlags::needs_b_flag(command_section_size);
         let command_section_header_size = MidiCommandListHeader::size(needs_b_flag);

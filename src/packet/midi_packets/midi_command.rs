@@ -79,7 +79,7 @@ impl MidiCommand {
         }
     }
 
-    pub fn read<R: Read>(
+    pub(super) fn read<R: Read>(
         reader: &mut R,
         running_status: Option<u8>,
     ) -> Result<Self, std::io::Error> {
@@ -153,7 +153,7 @@ impl MidiCommand {
         Ok(command)
     }
 
-    pub fn write<W: Write>(
+    pub(super) fn write<W: Write>(
         &self,
         writer: &mut W,
         running_status: Option<u8>,

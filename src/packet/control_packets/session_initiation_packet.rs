@@ -1,9 +1,6 @@
 use crate::util::ReadOptionalStringExt;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::{
-    fmt,
-    io::{Read, Write},
-};
+use std::io::{Read, Write};
 
 use super::control_packet::ControlPacket;
 
@@ -15,6 +12,7 @@ pub enum SessionInitiationPacket {
     Termination(SessionInitiationPacketBody),
 }
 
+#[derive(Debug)]
 pub struct SessionInitiationPacketBody {
     pub protocol_version: u32,
     pub initiator_token: u32,
@@ -56,7 +54,7 @@ impl SessionInitiationPacket {
         }
     }
 
-    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
+    pub(crate) fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
         let command = match self {
             SessionInitiationPacket::Invitation(_) => b"IN",
             SessionInitiationPacket::Acknowledgment(_) => b"OK",
@@ -68,10 +66,14 @@ impl SessionInitiationPacket {
         length += self.body().write(writer)?;
         Ok(length)
     }
+
+    pub fn size(&self) -> usize {
+        ControlPacket::HEADER_SIZE + self.body().size()
+    }
 }
 
 impl SessionInitiationPacketBody {
-    pub const MIN_SIZE: usize = 16;
+    pub const MIN_SIZE: usize = size_of::<u32>() * 12;
 
     pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         let protocol_version = reader.read_u32::<BigEndian>()?;
@@ -107,13 +109,115 @@ impl SessionInitiationPacketBody {
     }
 }
 
-impl fmt::Debug for SessionInitiationPacketBody {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SessionInitiationPacket")
-            .field("protocol_version", &self.protocol_version)
-            .field("initiator_token", &self.initiator_token)
-            .field("sender_ssrc", &self.sender_ssrc)
-            .field("name", &self.name)
-            .finish()
+#[cfg(test)]
+mod tests {
+    use crate::packet::control_packets::{
+        control_packet::ControlPacket, session_initiation_packet::SessionInitiationPacket,
+    };
+
+    #[test]
+    fn test_read_invitation() {
+        let buffer = [
+            0xFF, 0xFF, b'I', b'N', //header
+            0x00, 0x00, 0x00, 0x02, //version
+            0xF8, 0xD1, 0x80, 0xE6, //initiator token
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+            0x4C, 0x6F, 0x76, 0x65, 0x6C, 0x79, 0x20, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6F, 0x6E,
+            0x00, //name
+        ];
+
+        let result = ControlPacket::from_be_bytes(&buffer);
+        assert!(result.is_ok());
+        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
+            match packet {
+                SessionInitiationPacket::Invitation(invitation) => {
+                    assert_eq!(invitation.protocol_version, 2);
+                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
+                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
+                    assert_eq!(invitation.name, Some("Lovely Session".to_string()));
+                }
+                _ => panic!("Expected Acknowledgment packet"),
+            }
+        } else {
+            panic!("Expected SessionInitiation packet");
+        }
+    }
+
+    #[test]
+    fn test_read_acknowledgement() {
+        let buffer = [
+            0xFF, 0xFF, b'O', b'K', //header
+            0x00, 0x00, 0x00, 0x02, //version
+            0xF8, 0xD1, 0x80, 0xE6, //initiator token
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+        ];
+
+        let result = ControlPacket::from_be_bytes(&buffer);
+        assert!(result.is_ok());
+        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
+            match packet {
+                SessionInitiationPacket::Acknowledgment(invitation) => {
+                    assert_eq!(invitation.protocol_version, 2);
+                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
+                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
+                    assert_eq!(invitation.name, None);
+                }
+                _ => panic!("Expected Acknowledgment packet"),
+            }
+        } else {
+            panic!("Expected SessionInitiation packet");
+        }
+    }
+
+    #[test]
+    fn test_read_rejection() {
+        let buffer = [
+            0xFF, 0xFF, b'N', b'O', //header
+            0x00, 0x00, 0x00, 0x02, //version
+            0xF8, 0xD1, 0x80, 0xE6, //initiator token
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+        ];
+
+        let result = ControlPacket::from_be_bytes(&buffer);
+        assert!(result.is_ok());
+        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
+            match packet {
+                SessionInitiationPacket::Rejection(invitation) => {
+                    assert_eq!(invitation.protocol_version, 2);
+                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
+                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
+                    assert_eq!(invitation.name, None);
+                }
+                _ => panic!("Expected Rejection packet"),
+            }
+        } else {
+            panic!("Expected SessionInitiation packet");
+        }
+    }
+
+    #[test]
+    fn test_read_termination() {
+        let buffer = [
+            0xFF, 0xFF, b'B', b'Y', //header
+            0x00, 0x00, 0x00, 0x02, //version
+            0xF8, 0xD1, 0x80, 0xE6, //initiator token
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+        ];
+
+        let result = ControlPacket::from_be_bytes(&buffer);
+        assert!(result.is_ok());
+        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
+            match packet {
+                SessionInitiationPacket::Termination(invitation) => {
+                    assert_eq!(invitation.protocol_version, 2);
+                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
+                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
+                    assert_eq!(invitation.name, None);
+                }
+                _ => panic!("Expected Termination packet"),
+            }
+        } else {
+            panic!("Expected SessionInitiation packet");
+        }
     }
 }
