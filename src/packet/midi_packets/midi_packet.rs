@@ -88,6 +88,14 @@ impl MidiPacket {
     pub fn sequence_number(&self) -> u16 {
         self.header.sequence_number()
     }
+
+    pub fn timestamp(&self) -> u32 {
+        self.header.timestamp()
+    }
+
+    pub fn ssrc(&self) -> u32 {
+        self.header.ssrc()
+    }
 }
 
 #[cfg(test)]

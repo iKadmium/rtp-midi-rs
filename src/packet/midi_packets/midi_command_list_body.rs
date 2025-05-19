@@ -86,3 +86,50 @@ impl MidiCommandListBody {
         Ok(offset)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::midi_packets::delta_time::DeltaTime;
+    use crate::packet::midi_packets::midi_command::MidiCommand;
+    use crate::packet::midi_packets::midi_timed_command::TimedCommand;
+
+    #[test]
+    fn test_new_and_commands() {
+        let command = MidiCommand::NoteOn {
+            channel: 1,
+            key: 60,
+            velocity: 100,
+        };
+        let timed_command = TimedCommand::new(None, command);
+        let body = MidiCommandListBody::new(&[timed_command.clone()]);
+        let commands = body.commands();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], timed_command);
+    }
+
+    #[test]
+    fn test_size_and_write_read_roundtrip() {
+        let command1 = MidiCommand::NoteOn {
+            channel: 1,
+            key: 60,
+            velocity: 100,
+        };
+        let command2 = MidiCommand::NoteOff {
+            channel: 1,
+            key: 60,
+            velocity: 0,
+        };
+        let timed1 = TimedCommand::new(None, command1);
+        let timed2 = TimedCommand::new(Some(DeltaTime::zero()), command2);
+        let body = MidiCommandListBody::new(&[timed1.clone(), timed2.clone()]);
+        let size = body.size(false);
+        let mut buf = Vec::with_capacity(size);
+        body.write(&mut buf, false).unwrap();
+        let mut cursor = std::io::Cursor::new(buf);
+        let parsed = MidiCommandListBody::read(&mut cursor, false).unwrap();
+        assert_eq!(parsed.commands().len(), 2);
+        assert_eq!(parsed.commands()[0], timed1);
+        assert_eq!(parsed.commands()[1], timed2);
+    }
+}

@@ -289,4 +289,176 @@ mod tests {
         let deserialized_command = MidiCommand::read(&mut reader, None).unwrap();
         assert_eq!(original_command, deserialized_command);
     }
+
+    fn test_command_read_type(bytes: &[u8], expected_command: MidiCommand) {
+        let mut reader = Cursor::new(bytes);
+        let command = MidiCommand::read(&mut reader, None).unwrap();
+        assert_eq!(command, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_polyphonic_key_pressure() {
+        let bytes: Vec<u8> = vec![0xA4u8, 0x40, 0x7F];
+        let expected_command = MidiCommand::PolyphonicKeyPressure {
+            channel: 4,
+            key: 0x40,
+            pressure: 0x7F,
+        };
+        test_command_read_type(&bytes, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_control_change() {
+        let bytes: Vec<u8> = vec![0xB4u8, 0x40, 0x7F];
+        let expected_command = MidiCommand::ControlChange {
+            channel: 4,
+            controller: 0x40,
+            value: 0x7F,
+        };
+        test_command_read_type(&bytes, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_program_change() {
+        let bytes: Vec<u8> = vec![0xC4u8, 0x40];
+        let expected_command = MidiCommand::ProgramChange {
+            channel: 4,
+            program: 0x40,
+        };
+        test_command_read_type(&bytes, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_channel_pressure() {
+        let bytes: Vec<u8> = vec![0xD4u8, 0x40];
+        let expected_command = MidiCommand::ChannelPressure {
+            channel: 4,
+            pressure: 0x40,
+        };
+        test_command_read_type(&bytes, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_pitch_bend() {
+        let bytes: Vec<u8> = vec![0xE4u8, 0x40, 0x7F];
+        let expected_command = MidiCommand::PitchBend {
+            channel: 4,
+            lsb: 0x40,
+            msb: 0x7F,
+        };
+        test_command_read_type(&bytes, expected_command);
+    }
+
+    #[test]
+    fn test_command_read_invalid() {
+        let bytes: Vec<u8> = vec![0xFFu8, 0x40, 0x7F];
+        let mut reader = Cursor::new(bytes);
+        let result = MidiCommand::read(&mut reader, None);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    fn test_command_write_type(command: MidiCommand, expected_bytes: &[u8]) {
+        let mut bytes = Vec::new();
+        let bytes_written = command.write(&mut bytes, None).unwrap();
+        assert_eq!(bytes_written, expected_bytes.len());
+        assert_eq!(bytes, expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_note_off() {
+        let command = MidiCommand::NoteOff {
+            channel: 4,
+            key: 0x40,
+            velocity: 0x7F,
+        };
+        let expected_bytes: Vec<u8> = vec![0x84u8, 0x40, 0x7F];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_note_on() {
+        let command = MidiCommand::NoteOn {
+            channel: 4,
+            key: 0x40,
+            velocity: 0x7F,
+        };
+        let expected_bytes: Vec<u8> = vec![0x94u8, 0x40, 0x7F];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_polyphonic_key_pressure() {
+        let command = MidiCommand::PolyphonicKeyPressure {
+            channel: 4,
+            key: 0x40,
+            pressure: 0x7F,
+        };
+        let expected_bytes: Vec<u8> = vec![0xA4u8, 0x40, 0x7F];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_control_change() {
+        let command = MidiCommand::ControlChange {
+            channel: 4,
+            controller: 0x40,
+            value: 0x7F,
+        };
+        let expected_bytes: Vec<u8> = vec![0xB4u8, 0x40, 0x7F];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_program_change() {
+        let command = MidiCommand::ProgramChange {
+            channel: 4,
+            program: 0x40,
+        };
+        let expected_bytes: Vec<u8> = vec![0xC4u8, 0x40];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_channel_pressure() {
+        let command = MidiCommand::ChannelPressure {
+            channel: 4,
+            pressure: 0x40,
+        };
+        let expected_bytes: Vec<u8> = vec![0xD4u8, 0x40];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_pitch_bend() {
+        let command = MidiCommand::PitchBend {
+            channel: 4,
+            lsb: 0x40,
+            msb: 0x7F,
+        };
+        let expected_bytes: Vec<u8> = vec![0xE4u8, 0x40, 0x7F];
+        test_command_write_type(command, &expected_bytes);
+    }
+
+    #[test]
+    fn test_command_write_invalid() {
+        let command = MidiCommand::NoteOn {
+            channel: 4,
+            key: 0x40,
+            velocity: 0x7F,
+        };
+        let mut bytes = Vec::new();
+        let result = command.write(&mut bytes, None);
+        assert!(result.is_ok());
+        assert_eq!(bytes, vec![0x94u8, 0x40, 0x7F]);
+    }
+
+    #[test]
+    fn test_command_read_without_running_status() {
+        let bytes: Vec<u8> = vec![0x40, 0x7F];
+        let mut reader = Cursor::new(bytes);
+        let result = MidiCommand::read(&mut reader, None);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+    }
 }

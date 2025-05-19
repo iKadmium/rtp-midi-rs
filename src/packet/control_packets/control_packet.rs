@@ -93,4 +93,23 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(buffer, vec![255, 255, 67, 75]);
     }
+
+    #[test]
+    fn test_is_control_packet() {
+        let valid_packet = vec![255, 255, 67, 75];
+        let invalid_packet = vec![0, 0, 0, 0];
+        assert!(ControlPacket::is_control_packet(&valid_packet));
+        assert!(!ControlPacket::is_control_packet(&invalid_packet));
+    }
+
+    #[test]
+    fn test_parse_unknown_control_packet() {
+        let data = vec![255, 255, 0, 0];
+        let result = ControlPacket::from_be_bytes(&data);
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert_eq!(e.kind(), ErrorKind::InvalidData);
+            assert_eq!(e.to_string(), "Unknown control packet, \u{0}\u{0}");
+        }
+    }
 }

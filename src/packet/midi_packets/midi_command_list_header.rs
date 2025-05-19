@@ -117,10 +117,6 @@ impl MidiCommandListHeader {
         let flags = MidiCommandListFlags::from_u8(first_byte);
         let result = if flags.b_flag() {
             let length_lsb = reader.read_u8()?;
-            // Correctly reconstruct the 12-bit length from the two bytes
-            // The first byte contains the 4 flag bits and the 4 MSBs of the length.
-            // The second byte contains the 8 LSBs of the length.
-            // So, length = ((first_byte & 0x0F) << 8) | length_lsb
             let length = (((first_byte & 0x0F) as u16) << 8) | (length_lsb as u16);
             Self {
                 flags,
@@ -132,5 +128,25 @@ impl MidiCommandListHeader {
         };
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_midi_command_list_header() {
+        let mut buffer = Vec::new();
+        let header =
+            MidiCommandListHeader::new(MidiCommandListFlags::new(true, false, true, false), 0x123);
+        header.write(&mut buffer).unwrap();
+
+        let mut cursor = Cursor::new(buffer);
+        let read_header = MidiCommandListHeader::read(&mut cursor).unwrap();
+
+        assert_eq!(header.flags(), read_header.flags());
+        assert_eq!(header.length(), read_header.length());
     }
 }

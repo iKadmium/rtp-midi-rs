@@ -288,7 +288,7 @@ impl RtpMidiSession {
             name.to_string(),
         );
 
-        let mut response_bytes = vec![0u8; response_packet.size()];
+        let mut response_bytes = Vec::with_capacity(response_packet.size());
         response_packet.write(&mut response_bytes).unwrap();
 
         if let Err(e) = socket.send_to(&response_bytes, src).await {

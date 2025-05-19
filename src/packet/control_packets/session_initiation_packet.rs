@@ -54,13 +54,17 @@ impl SessionInitiationPacket {
         }
     }
 
-    pub(crate) fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
-        let command = match self {
+    fn command(&self) -> &[u8; 2] {
+        match self {
             SessionInitiationPacket::Invitation(_) => b"IN",
             SessionInitiationPacket::Acknowledgment(_) => b"OK",
             SessionInitiationPacket::Rejection(_) => b"NO",
             SessionInitiationPacket::Termination(_) => b"BY",
-        };
+        }
+    }
+
+    pub(crate) fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
+        let command = self.command();
 
         let mut length = ControlPacket::write_header(writer, command)?;
         length += self.body().write(writer)?;
@@ -73,7 +77,7 @@ impl SessionInitiationPacket {
 }
 
 impl SessionInitiationPacketBody {
-    pub const MIN_SIZE: usize = size_of::<u32>() * 12;
+    pub const MIN_SIZE: usize = size_of::<u32>() * 3;
 
     pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
         let protocol_version = reader.read_u32::<BigEndian>()?;
@@ -111,14 +115,58 @@ impl SessionInitiationPacketBody {
 
 #[cfg(test)]
 mod tests {
-    use crate::packet::control_packets::{
-        control_packet::ControlPacket, session_initiation_packet::SessionInitiationPacket,
+    use std::io::Cursor;
+
+    use crate::packet::control_packets::session_initiation_packet::{
+        SessionInitiationPacket, SessionInitiationPacketBody,
     };
+
+    fn get_test_body() -> [u8; 12] {
+        [
+            0x00, 0x00, 0x00, 0x02, //version
+            0xF8, 0xD1, 0x80, 0xE6, //initiator token
+            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
+        ]
+    }
+
+    fn test_session_initiation_read_type(command: &[u8; 2]) {
+        let mut cursor = Cursor::new(get_test_body());
+        let result = SessionInitiationPacket::read(&mut cursor, command);
+        match result {
+            Ok(packet) => {
+                assert_eq!(packet.command(), command);
+                assert_eq!(packet.body().protocol_version, 2);
+                assert_eq!(packet.body().initiator_token, 0xF8D180E6);
+                assert_eq!(packet.body().sender_ssrc, 0xF519AEB9);
+                assert_eq!(packet.body().name, None);
+            }
+            Err(e) => panic!("Failed to read packet: {}", e),
+        }
+    }
 
     #[test]
     fn test_read_invitation() {
+        test_session_initiation_read_type(b"IN");
+    }
+
+    #[test]
+    fn test_read_acknowledgement() {
+        test_session_initiation_read_type(b"OK");
+    }
+
+    #[test]
+    fn test_read_rejection() {
+        test_session_initiation_read_type(b"NO");
+    }
+
+    #[test]
+    fn test_read_termination() {
+        test_session_initiation_read_type(b"BY");
+    }
+
+    #[test]
+    fn test_read_body() {
         let buffer = [
-            0xFF, 0xFF, b'I', b'N', //header
             0x00, 0x00, 0x00, 0x02, //version
             0xF8, 0xD1, 0x80, 0xE6, //initiator token
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
@@ -126,98 +174,62 @@ mod tests {
             0x00, //name
         ];
 
-        let result = ControlPacket::from_be_bytes(&buffer);
-        assert!(result.is_ok());
-        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
-            match packet {
-                SessionInitiationPacket::Invitation(invitation) => {
-                    assert_eq!(invitation.protocol_version, 2);
-                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
-                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
-                    assert_eq!(invitation.name, Some("Lovely Session".to_string()));
-                }
-                _ => panic!("Expected Acknowledgment packet"),
+        let mut cursor = Cursor::new(buffer);
+        let result = SessionInitiationPacketBody::read(&mut cursor);
+        match result {
+            Ok(body) => {
+                assert_eq!(body.protocol_version, 2);
+                assert_eq!(body.initiator_token, 0xF8D180E6);
+                assert_eq!(body.sender_ssrc, 0xF519AEB9);
+                assert_eq!(body.name, Some("Lovely Session".to_string()));
             }
-        } else {
-            panic!("Expected SessionInitiation packet");
+            Err(e) => panic!("Failed to read body: {}", e),
         }
     }
 
     #[test]
-    fn test_read_acknowledgement() {
-        let buffer = [
-            0xFF, 0xFF, b'O', b'K', //header
-            0x00, 0x00, 0x00, 0x02, //version
-            0xF8, 0xD1, 0x80, 0xE6, //initiator token
-            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
-        ];
+    fn test_read_invalid() {
+        let mut cursor = Cursor::new(get_test_body());
+        let result = SessionInitiationPacket::read(&mut cursor, b"XY");
+        assert!(result.is_err());
+    }
 
-        let result = ControlPacket::from_be_bytes(&buffer);
-        assert!(result.is_ok());
-        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
-            match packet {
-                SessionInitiationPacket::Acknowledgment(invitation) => {
-                    assert_eq!(invitation.protocol_version, 2);
-                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
-                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
-                    assert_eq!(invitation.name, None);
-                }
-                _ => panic!("Expected Acknowledgment packet"),
-            }
+    #[test]
+    fn test_new_acknowledgment() {
+        let initiator_token = 0xF8D180E6;
+        let sender_ssrc = 0xF519AEB9;
+        let name = "Lovely Session".to_string();
+        let packet =
+            SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
+        if let SessionInitiationPacket::Acknowledgment(body) = packet {
+            assert_eq!(body.protocol_version, 2);
+            assert_eq!(body.initiator_token, initiator_token);
+            assert_eq!(body.sender_ssrc, sender_ssrc);
+            assert_eq!(body.name, Some(name));
         } else {
-            panic!("Expected SessionInitiation packet");
+            panic!("Expected Acknowledgment packet");
         }
     }
 
     #[test]
-    fn test_read_rejection() {
-        let buffer = [
-            0xFF, 0xFF, b'N', b'O', //header
-            0x00, 0x00, 0x00, 0x02, //version
-            0xF8, 0xD1, 0x80, 0xE6, //initiator token
-            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
-        ];
-
-        let result = ControlPacket::from_be_bytes(&buffer);
+    fn test_write() {
+        let initiator_token = 0xF8D180E6;
+        let sender_ssrc = 0xF519AEB9;
+        let name = "Lovely Session".to_string();
+        let packet =
+            SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
+        let mut buffer = Vec::new();
+        let result = packet.write(&mut buffer);
         assert!(result.is_ok());
-        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
-            match packet {
-                SessionInitiationPacket::Rejection(invitation) => {
-                    assert_eq!(invitation.protocol_version, 2);
-                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
-                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
-                    assert_eq!(invitation.name, None);
-                }
-                _ => panic!("Expected Rejection packet"),
-            }
-        } else {
-            panic!("Expected SessionInitiation packet");
-        }
-    }
-
-    #[test]
-    fn test_read_termination() {
-        let buffer = [
-            0xFF, 0xFF, b'B', b'Y', //header
-            0x00, 0x00, 0x00, 0x02, //version
-            0xF8, 0xD1, 0x80, 0xE6, //initiator token
-            0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
-        ];
-
-        let result = ControlPacket::from_be_bytes(&buffer);
-        assert!(result.is_ok());
-        if let ControlPacket::SessionInitiation(packet) = result.unwrap() {
-            match packet {
-                SessionInitiationPacket::Termination(invitation) => {
-                    assert_eq!(invitation.protocol_version, 2);
-                    assert_eq!(invitation.initiator_token, 0xF8D180E6);
-                    assert_eq!(invitation.sender_ssrc, 0xF519AEB9);
-                    assert_eq!(invitation.name, None);
-                }
-                _ => panic!("Expected Termination packet"),
-            }
-        } else {
-            panic!("Expected SessionInitiation packet");
-        }
+        let length = result.unwrap();
+        assert_eq!(length, packet.size());
+        assert_eq!(buffer.len(), length);
+        assert_eq!(&buffer[0..2], &[255, 255]);
+        assert_eq!(&buffer[2..4], b"OK");
+        assert_eq!(&buffer[4..8], &get_test_body()[0..4]);
+        assert_eq!(&buffer[8..12], &get_test_body()[4..8]);
+        assert_eq!(&buffer[12..16], &get_test_body()[8..12]);
+        assert_eq!(&buffer[16..30], name.as_bytes());
+        assert_eq!(buffer[30], 0); // Null terminator for the name
     }
 }
