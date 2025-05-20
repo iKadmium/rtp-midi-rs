@@ -6,6 +6,12 @@ debug = true
 name = "rtpmidi"
 version = "0.1.0"
 edition = "2024"
+authors = ["Jesse Higginson "]
+description = "A library for RTP-MIDI / AppleMIDI"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/iKadmium/rtp-midi-rs"
+repository = "https://github.com/iKadmium/rtp-midi-rs"
 
 [dependencies]
 mdns-sd = { version = "0.13.9", optional = true }
