@@ -16,6 +16,10 @@ session
     })
     .await;
 
+// start listening for packets - this can be accept_all_invitations, reject_all_invitations, or a function
+// that takes the form my_function(packet: &SessionInitiationPacket, socket: &SocketAddr) -> bool
+let _ = server.start(RtpMidiSession::accept_all_invitations).await;
+
 // invite another participant to the session
 let addr = std::net::SocketAddr::new("192.168.0.1".parse().unwrap(), 5006);
 let _ = invite_server.invite_participant(addr).await.unwrap();

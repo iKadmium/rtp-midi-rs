@@ -20,7 +20,7 @@ async fn main() {
         .await;
 
     // Wait for the server task to complete (keeps process alive)
-    let _ = server.start().await;
+    let _ = server.start(RtpMidiSession::accept_all_invitations).await;
 }
 
 #[cfg(not(feature = "examples"))]

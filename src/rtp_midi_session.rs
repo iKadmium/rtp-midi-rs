@@ -52,6 +52,14 @@ impl RtpMidiSession {
         })
     }
 
+    pub fn accept_all_invitations(_packet: &SessionInitiationPacket, _socket: &SocketAddr) -> bool {
+        true
+    }
+
+    pub fn reject_all_invitations(_packet: &SessionInitiationPacket, _socket: &SocketAddr) -> bool {
+        false
+    }
+
     pub async fn add_listener<F>(&self, event_type: RtpMidiEventType, callback: F)
     where
         F: Fn(MidiPacket) + Send + 'static,
@@ -60,7 +68,10 @@ impl RtpMidiSession {
         listeners.insert(event_type, Box::new(callback));
     }
 
-    pub async fn start(&self) -> std::io::Result<()> {
+    pub async fn start<F>(&self, invite_handler: F) -> std::io::Result<()>
+    where
+        F: Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync + 'static,
+    {
         // Start periodic stale participant removal
         self.start_host_clock_sync().await;
 
@@ -73,6 +84,7 @@ impl RtpMidiSession {
         let participants_clone_midi = Arc::clone(&self.participants); // Renamed for clarity
         let session_seq = Arc::clone(&self.sequence_number);
         let start_time = self.start_time; // Capture start_time
+        let invite_handler = Arc::new(invite_handler);
 
         let control_task = task::spawn(Self::listen_for_control(
             self.control_socket.clone(),
@@ -82,6 +94,7 @@ impl RtpMidiSession {
             participants_clone_control,
             start_time,
             self.pending_invitations.clone(),
+            invite_handler.clone(),
         ));
 
         let midi_task = task::spawn(Self::listen_for_midi(
@@ -130,61 +143,58 @@ impl RtpMidiSession {
     }
 
     async fn listen_for_control(
-        socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
+        socket: Arc<UdpSocket>,
         midi_socket: Arc<UdpSocket>,
         name: String,
         ssrc: u32,
         participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
         start_time: Instant,
         pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
+        invite_handler: Arc<dyn Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync>,
     ) {
         let mut buf = [0; 65535];
         loop {
-            // Removed: let socket = socket.lock().await;
             match socket.recv_from(&mut buf).await {
-                // Use socket directly
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
                     match ControlPacket::from_be_bytes(&buf[..amt]) {
                         Ok(packet) => {
                             trace!("Control: Parsed packet: {:?}", packet);
                             match packet {
-                                ControlPacket::SessionInitiation(session_initiation_packet) => {
-                                    match session_initiation_packet {
-                                        SessionInitiationPacket::Invitation(invitaiton) => {
-                                            info!("Control: Received session initiation from {}", src);
-                                            Self::send_invitation_response(
-                                                &socket, // Pass &socket (Arc derefs to UdpSocket)
-                                                src,
-                                                ssrc,
-                                                invitaiton.initiator_token,
-                                                &name,
-                                            )
-                                            .await;
-                                        }
-                                        SessionInitiationPacket::Acknowledgment(ack_body) => {
-                                            info!("Control: Received session acknowledgment from {} for token {}", src, ack_body.initiator_token);
-                                            Self::handle_acknowledgment(
-                                                true,
-                                                src,
-                                                ack_body.initiator_token,
-                                                ssrc,
-                                                &name,
-                                                start_time,
-                                                pending_invitations.clone(),
-                                                midi_socket.clone(),
-                                            )
-                                            .await;
-                                        }
-                                        SessionInitiationPacket::Rejection(_) => {
-                                            info!("Control: Received session rejection from {}", src);
-                                        }
-                                        SessionInitiationPacket::Termination(_) => {
-                                            info!("Control: Received session termination from {}", src);
-                                            Self::handle_end_session(src, &participants);
+                                ControlPacket::SessionInitiation(session_initiation_packet) => match &session_initiation_packet {
+                                    SessionInitiationPacket::Invitation(invitation) => {
+                                        let accept = (invite_handler)(&session_initiation_packet, &src);
+                                        if accept {
+                                            info!("Control: Accepted session initiation from {}", src);
+                                            Self::send_invitation_response(&socket, src, ssrc, invitation.initiator_token, &name).await;
+                                        } else {
+                                            info!("Control: Rejected session initiation from {}", src);
+                                            let rejection_packet = SessionInitiationPacket::new_rejection(invitation.initiator_token, ssrc, name.clone());
+                                            let _ = socket.send_to(&rejection_packet.to_bytes(), src).await;
                                         }
                                     }
-                                }
+                                    SessionInitiationPacket::Acknowledgment(ack_body) => {
+                                        info!("Control: Received session acknowledgment from {} for token {}", src, ack_body.initiator_token);
+                                        Self::handle_acknowledgment(
+                                            true,
+                                            src,
+                                            ack_body.initiator_token,
+                                            ssrc,
+                                            &name,
+                                            start_time,
+                                            pending_invitations.clone(),
+                                            midi_socket.clone(),
+                                        )
+                                        .await;
+                                    }
+                                    SessionInitiationPacket::Rejection(_) => {
+                                        info!("Control: Received session rejection from {}", src);
+                                    }
+                                    SessionInitiationPacket::Termination(_) => {
+                                        info!("Control: Received session termination from {}", src);
+                                        Self::handle_end_session(src, &participants);
+                                    }
+                                },
                                 _ => {
                                     warn!("Control: Unhandled control packet: {:?}", packet);
                                 }

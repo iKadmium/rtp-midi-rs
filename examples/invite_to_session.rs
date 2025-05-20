@@ -16,7 +16,10 @@ async fn main() {
     let server_task = {
         let server = server.clone();
         tokio::spawn(async move {
-            server.start().await.expect("Error while running the server");
+            server
+                .start(RtpMidiSession::accept_all_invitations)
+                .await
+                .expect("Error while running the server");
         })
     };
 

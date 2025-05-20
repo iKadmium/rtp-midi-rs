@@ -39,6 +39,15 @@ impl SessionInitiationPacket {
         })
     }
 
+    pub fn new_rejection(initiator_token: u32, sender_ssrc: u32, name: String) -> Self {
+        SessionInitiationPacket::Rejection(SessionInitiationPacketBody {
+            protocol_version: 2,
+            initiator_token,
+            sender_ssrc,
+            name: Some(name),
+        })
+    }
+
     pub fn new_termination(initiator_token: u32, sender_ssrc: u32) -> Self {
         SessionInitiationPacket::Termination(SessionInitiationPacketBody {
             protocol_version: 2,
@@ -90,14 +99,22 @@ impl SessionInitiationPacket {
         Ok(length)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(self.size());
         self.write(&mut buffer).expect("Failed to write SessionInitiationPacket");
         buffer
     }
 
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         ControlPacket::HEADER_SIZE + self.body().size()
+    }
+
+    pub fn ssrc(&self) -> u32 {
+        self.body().sender_ssrc
+    }
+
+    pub fn protocol_version(&self) -> u32 {
+        self.body().protocol_version
     }
 }
 
