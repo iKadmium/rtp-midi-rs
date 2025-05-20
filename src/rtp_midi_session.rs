@@ -304,7 +304,7 @@ impl RtpMidiSession {
                                                     src
                                                 );
                                                 Self::send_invitation_response(
-                                                    &socket, // Pass &socket (Arc derefs to UdpSocket)
+                                                    &socket,
                                                     src,
                                                     ssrc,
                                                     invitation.initiator_token,
@@ -317,60 +317,15 @@ impl RtpMidiSession {
                                                     "MIDI: Received session acknowledgment from {} for token {}",
                                                     src, ack_body.initiator_token
                                                 );
-                                                let locked_pending_invitations =
-                                                    pending_invitations.lock().await;
-                                                if let Some(expected_token) =
-                                                    locked_pending_invitations.get(&src).cloned()
-                                                {
-                                                    if expected_token == ack_body.initiator_token {
-                                                        // MIDI port ACK matches our pending invitation.
-                                                        drop(locked_pending_invitations); // Release lock before await
-
-                                                        info!(
-                                                            "MIDI: Matched Acknowledgment from {} for MIDI port invitation. Sending Clock Sync.",
-                                                            src
-                                                        );
-                                                        let timestamp =
-                                                            Self::current_timestamp(start_time);
-                                                        let clock_sync_packet =
-                                                            ClockSyncPacket::new(
-                                                                0,
-                                                                [timestamp, 0, 0],
-                                                                ssrc,
-                                                            );
-                                                        let mut sync_buf =
-                                                            vec![0u8; ClockSyncPacket::SIZE];
-                                                        let mut cursor = Cursor::new(&mut sync_buf);
-                                                        clock_sync_packet
-                                                            .write(&mut cursor)
-                                                            .unwrap();
-                                                        if let Err(e) =
-                                                            socket.send_to(&sync_buf, src).await
-                                                        {
-                                                            warn!(
-                                                                "MIDI: Failed to send clock sync to {}: {}",
-                                                                src, e
-                                                            );
-                                                        } else {
-                                                            info!(
-                                                                "MIDI: Sent clock sync to {}",
-                                                                src
-                                                            );
-                                                        }
-                                                    } else {
-                                                        warn!(
-                                                            "MIDI: Received Acknowledgment from {} with mismatched token. Expected {}, got {}.",
-                                                            src,
-                                                            expected_token,
-                                                            ack_body.initiator_token
-                                                        );
-                                                    }
-                                                } else {
-                                                    warn!(
-                                                        "MIDI: Received Acknowledgment from {} but no pending invitation found for this address.",
-                                                        src
-                                                    );
-                                                }
+                                                Self::handle_midi_acknowledgment(
+                                                    &socket,
+                                                    src,
+                                                    ack_body.initiator_token,
+                                                    ssrc,
+                                                    start_time,
+                                                    pending_invitations.clone(),
+                                                )
+                                                .await;
                                             }
                                             _ => {
                                                 warn!(
@@ -495,6 +450,10 @@ impl RtpMidiSession {
             }
             1 => {
                 // Remove pending invitation and add as participant if needed
+                let mut invitations = pending_invitations.lock().await;
+                invitations.remove(&src);
+                drop(invitations);
+
                 let control_port_addr = SocketAddr::new(src.ip(), src.port() - 1); // Use control port address
                 let mut lock = participants.lock().await;
                 lock.insert(
@@ -686,6 +645,48 @@ impl RtpMidiSession {
             midi_socket: Arc::clone(&self.midi_socket),
             control_socket: Arc::clone(&self.control_socket),
             pending_invitations: Arc::clone(&self.pending_invitations),
+        }
+    }
+
+    async fn handle_midi_acknowledgment(
+        socket: &UdpSocket,
+        src: SocketAddr,
+        ack_token: u32,
+        ssrc: u32,
+        start_time: Instant,
+        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
+    ) {
+        let locked_pending_invitations = pending_invitations.lock().await;
+        if let Some(expected_token) = locked_pending_invitations.get(&src).cloned() {
+            if expected_token == ack_token {
+                // MIDI port ACK matches our pending invitation.
+                drop(locked_pending_invitations); // Release lock before await
+
+                info!(
+                    "MIDI: Matched Acknowledgment from {} for MIDI port invitation. Sending Clock Sync.",
+                    src
+                );
+                let timestamp = Self::current_timestamp(start_time);
+                let clock_sync_packet = ClockSyncPacket::new(0, [timestamp, 0, 0], ssrc);
+                let mut sync_buf = vec![0u8; ClockSyncPacket::SIZE];
+                let mut cursor = Cursor::new(&mut sync_buf);
+                clock_sync_packet.write(&mut cursor).unwrap();
+                if let Err(e) = socket.send_to(&sync_buf, src).await {
+                    warn!("MIDI: Failed to send clock sync to {}: {}", src, e);
+                } else {
+                    info!("MIDI: Sent clock sync to {}", src);
+                }
+            } else {
+                warn!(
+                    "MIDI: Received Acknowledgment from {} with mismatched token. Expected {}, got {}.",
+                    src, expected_token, ack_token
+                );
+            }
+        } else {
+            warn!(
+                "MIDI: Received Acknowledgment from {} but no pending invitation found for this address.",
+                src
+            );
         }
     }
 }
