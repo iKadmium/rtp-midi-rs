@@ -2,48 +2,24 @@ use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use std::io::{Read, Write};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)] // Removed `Copy` trait as `SysEx` uses `Vec<u8>`
 #[repr(u8)]
 #[allow(dead_code)]
 pub enum MidiCommand {
-    NoteOff {
-        channel: u8,
-        key: u8,
-        velocity: u8,
-    },
-    NoteOn {
-        channel: u8,
-        key: u8,
-        velocity: u8,
-    },
-    PolyphonicKeyPressure {
-        channel: u8,
-        key: u8,
-        pressure: u8,
-    },
-    ControlChange {
-        channel: u8,
-        controller: u8,
-        value: u8,
-    },
-    ProgramChange {
-        channel: u8,
-        program: u8,
-    },
-    ChannelPressure {
-        channel: u8,
-        pressure: u8,
-    },
-    PitchBend {
-        channel: u8,
-        lsb: u8,
-        msb: u8,
-    },
+    NoteOff { channel: u8, key: u8, velocity: u8 },
+    NoteOn { channel: u8, key: u8, velocity: u8 },
+    PolyphonicKeyPressure { channel: u8, key: u8, pressure: u8 },
+    ControlChange { channel: u8, controller: u8, value: u8 },
+    ProgramChange { channel: u8, program: u8 },
+    ChannelPressure { channel: u8, pressure: u8 },
+    PitchBend { channel: u8, lsb: u8, msb: u8 },
+    SysEx(Vec<u8>), // System Exclusive message
 }
 
 impl MidiCommand {
     pub fn size(&self) -> usize {
         match self {
+            MidiCommand::SysEx(data) => data.len(),
             MidiCommand::NoteOff { .. } => 2,
             MidiCommand::NoteOn { .. } => 2,
             MidiCommand::PolyphonicKeyPressure { .. } => 2,
@@ -56,6 +32,7 @@ impl MidiCommand {
 
     pub fn status(&self) -> u8 {
         match self {
+            MidiCommand::SysEx(_) => 0xF0,
             MidiCommand::NoteOff { channel, .. } => 0x80 | (channel & 0x0F),
             MidiCommand::NoteOn { channel, .. } => 0x90 | (channel & 0x0F),
             MidiCommand::PolyphonicKeyPressure { channel, .. } => 0xA0 | (channel & 0x0F),
@@ -79,11 +56,19 @@ impl MidiCommand {
         }
     }
 
-    pub(super) fn read<R: Read>(
-        reader: &mut R,
-        running_status: Option<u8>,
-    ) -> Result<Self, std::io::Error> {
+    pub(super) fn read<R: Read>(reader: &mut R, running_status: Option<u8>) -> Result<Self, std::io::Error> {
         let first_byte = reader.read_u8()?;
+        if first_byte == 0xF0 {
+            let mut data = Vec::new();
+            loop {
+                let byte = reader.read_u8()?;
+                if byte == 0xF7 {
+                    break;
+                }
+                data.push(byte);
+            }
+            return Ok(MidiCommand::SysEx(data));
+        }
         let mut data: [u8; 2] = [0; 2];
 
         let (status, data_bytes_read) = if first_byte & 0x80 == 0 {
@@ -93,10 +78,7 @@ impl MidiCommand {
                     (rs, 1)
                 }
                 None => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "No status with no running status byte",
-                    ));
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "No status with no running status byte"));
                 }
             }
         } else {
@@ -129,24 +111,15 @@ impl MidiCommand {
                 controller: data[0],
                 value: data[1],
             },
-            0xC0 => MidiCommand::ProgramChange {
-                channel,
-                program: data[0],
-            },
-            0xD0 => MidiCommand::ChannelPressure {
-                channel,
-                pressure: data[0],
-            },
+            0xC0 => MidiCommand::ProgramChange { channel, program: data[0] },
+            0xD0 => MidiCommand::ChannelPressure { channel, pressure: data[0] },
             0xE0 => MidiCommand::PitchBend {
                 channel,
                 lsb: data[0],
                 msb: data[1],
             },
             _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Invalid MIDI command",
-                ));
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid MIDI command"));
             }
         };
 
@@ -156,21 +129,19 @@ impl MidiCommand {
     pub(super) fn write<W: Write>(
         &self,
         writer: &mut W,
-        running_status: Option<u8>,
+        _running_status: Option<u8>, // Marked as unused for SysEx
     ) -> Result<usize, std::io::Error> {
         let mut bytes_written = 0;
-        let status = self.status();
-        let write_status = match running_status {
-            Some(rs) => status != rs,
-            None => true,
-        };
-        if write_status {
-            writer.write_u8(status)?;
-            bytes_written += 1;
-        }
         match self {
-            MidiCommand::NoteOff { key, velocity, .. }
-            | MidiCommand::NoteOn { key, velocity, .. } => {
+            MidiCommand::SysEx(data) => {
+                writer.write_u8(0xF0)?;
+                bytes_written += 1;
+                writer.write_all(data)?;
+                bytes_written += data.len();
+                writer.write_u8(0xF7)?;
+                bytes_written += 1;
+            }
+            MidiCommand::NoteOff { key, velocity, .. } | MidiCommand::NoteOn { key, velocity, .. } => {
                 writer.write_u8(*key)?;
                 writer.write_u8(*velocity)?;
                 bytes_written += 2;
@@ -180,9 +151,7 @@ impl MidiCommand {
                 writer.write_u8(*pressure)?;
                 bytes_written += 2;
             }
-            MidiCommand::ControlChange {
-                controller, value, ..
-            } => {
+            MidiCommand::ControlChange { controller, value, .. } => {
                 writer.write_u8(*controller)?;
                 writer.write_u8(*value)?;
                 bytes_written += 2;
@@ -221,12 +190,7 @@ mod tests {
         assert_eq!(command.status(), 0x97);
         assert_eq!(command.size(), 2);
         // Check fields
-        if let MidiCommand::NoteOn {
-            key,
-            velocity,
-            channel,
-        } = command
-        {
+        if let MidiCommand::NoteOn { key, velocity, channel } = command {
             assert_eq!(channel, 7);
             assert_eq!(key, 0x40);
             assert_eq!(velocity, 0x7F);
@@ -321,20 +285,14 @@ mod tests {
     #[test]
     fn test_command_read_program_change() {
         let bytes: Vec<u8> = vec![0xC4u8, 0x40];
-        let expected_command = MidiCommand::ProgramChange {
-            channel: 4,
-            program: 0x40,
-        };
+        let expected_command = MidiCommand::ProgramChange { channel: 4, program: 0x40 };
         test_command_read_type(&bytes, expected_command);
     }
 
     #[test]
     fn test_command_read_channel_pressure() {
         let bytes: Vec<u8> = vec![0xD4u8, 0x40];
-        let expected_command = MidiCommand::ChannelPressure {
-            channel: 4,
-            pressure: 0x40,
-        };
+        let expected_command = MidiCommand::ChannelPressure { channel: 4, pressure: 0x40 };
         test_command_read_type(&bytes, expected_command);
     }
 
@@ -411,20 +369,14 @@ mod tests {
 
     #[test]
     fn test_command_write_program_change() {
-        let command = MidiCommand::ProgramChange {
-            channel: 4,
-            program: 0x40,
-        };
+        let command = MidiCommand::ProgramChange { channel: 4, program: 0x40 };
         let expected_bytes: Vec<u8> = vec![0xC4u8, 0x40];
         test_command_write_type(command, &expected_bytes);
     }
 
     #[test]
     fn test_command_write_channel_pressure() {
-        let command = MidiCommand::ChannelPressure {
-            channel: 4,
-            pressure: 0x40,
-        };
+        let command = MidiCommand::ChannelPressure { channel: 4, pressure: 0x40 };
         let expected_bytes: Vec<u8> = vec![0xD4u8, 0x40];
         test_command_write_type(command, &expected_bytes);
     }
