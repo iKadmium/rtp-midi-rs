@@ -1,5 +1,4 @@
 use log::{debug, error, info, trace, warn};
-use mdns_sd::{ServiceDaemon, ServiceInfo};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -8,6 +7,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::time::sleep;
+
+#[cfg(feature = "mdns")]
+use mdns_sd::{ServiceDaemon, ServiceInfo};
 
 use crate::packet::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packets::control_packet::ControlPacket;
@@ -63,7 +65,7 @@ impl RtpMidiSession {
         self.start_host_clock_sync().await;
 
         // Advertise the service on mDNS
-        Self::advertise_service(&self.name.clone(), self.control_socket.local_addr()?.port()).expect("Failed to advertise service");
+        Self::advertise_mdns(&self.name.clone(), self.control_socket.local_addr()?.port()).expect("Failed to advertise service");
 
         let session_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
@@ -107,7 +109,8 @@ impl RtpMidiSession {
         Ok(())
     }
 
-    fn advertise_service(instance_name: &str, port: u16) -> Result<(), mdns_sd::Error> {
+    #[cfg(feature = "mdns")]
+    pub fn advertise_mdns(instance_name: &str, port: u16) -> Result<(), mdns_sd::Error> {
         let mdns = ServiceDaemon::new()?;
         let service_type = "_apple-midi._udp.local.";
         let ip = local_ip_address::local_ip().expect("Failed to get local IP address").to_string();
@@ -117,6 +120,12 @@ impl RtpMidiSession {
         let service = ServiceInfo::new(service_type, instance_name, &hostname, ip, port, None)?;
         mdns.register(service)?;
 
+        Ok(())
+    }
+
+    #[cfg(not(feature = "mdns"))]
+    pub fn advertise_mdns(_: &str, _: u16) -> Result<(), std::io::Error> {
+        info!("mDNS advertising is disabled. To enable it, compile with the 'mdns' feature.");
         Ok(())
     }
 
