@@ -4,21 +4,13 @@ use log::info;
 use rtpmidi::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
 use tokio; // Add tokio runtime for async main
 
-use rtpmidi::packet::midi_packets::{
-    midi_command::MidiCommand, midi_packet::MidiPacket, midi_timed_command::TimedCommand,
-};
+use rtpmidi::packet::midi_packets::{midi_command::MidiCommand, midi_packet::MidiPacket, midi_timed_command::TimedCommand};
 
 #[tokio::main]
 async fn main() {
-    colog::default_builder()
-        .filter_level(log::LevelFilter::Trace)
-        .init();
+    colog::default_builder().filter_level(log::LevelFilter::Trace).init();
 
-    let server = Arc::new(
-        RtpMidiSession::new("My Session".to_string(), 54321, 5004)
-            .await
-            .unwrap(),
-    );
+    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321, 5004).await.unwrap());
 
     let server_clone = server.clone();
     server
@@ -31,11 +23,7 @@ async fn main() {
                     .commands()
                     .iter()
                     .filter_map(|c| match c.command() {
-                        MidiCommand::NoteOn {
-                            channel,
-                            key,
-                            velocity,
-                        } => Some(TimedCommand::new(
+                        MidiCommand::NoteOn { channel, key, velocity } => Some(TimedCommand::new(
                             None,
                             MidiCommand::NoteOn {
                                 channel: *channel,
@@ -61,17 +49,14 @@ async fn main() {
     let server_task = {
         let server = server.clone();
         tokio::spawn(async move {
-            server
-                .start()
-                .await
-                .expect("Error while running the server");
+            server.start().await.expect("Error while running the server");
         })
     };
 
     let invite_server = server.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let addr = std::net::SocketAddr::new("192.168.0.28".parse().unwrap(), 5006);
+        let addr = std::net::SocketAddr::new("192.168.0.42".parse().unwrap(), 5006);
         if let Err(e) = invite_server.invite_participant(addr).await {
             info!("Failed to invite participant: {}", e);
         } else {

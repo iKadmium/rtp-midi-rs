@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio::task;
+use tokio::time::sleep;
 
 use crate::packet::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packet::control_packets::control_packet::ControlPacket;
@@ -325,20 +326,22 @@ impl RtpMidiSession {
 
                 let control_port_addr = SocketAddr::new(src.ip(), src.port() - 1); // Use control port address
                 let mut lock = participants.lock().await;
-                lock.insert(
-                    control_port_addr,
-                    Participant::new(control_port_addr, true), // Mark as invited by us
-                );
-                info!("Added {} as participant after clock sync", control_port_addr);
+                if !lock.contains_key(&control_port_addr) {
+                    lock.insert(
+                        control_port_addr,
+                        Participant::new(control_port_addr, true), // Mark as invited by us
+                    );
+                    info!("Added {} as participant after clock sync", control_port_addr);
+                }
 
                 // Respond with count = 2
                 let timestamp3 = Self::current_timestamp(start_time); // Use start_time
                 let response_packet = ClockSyncPacket::new(2, [packet.timestamps[0], packet.timestamps[1], timestamp3], ssrc);
 
                 if let Err(e) = socket.send_to(&response_packet.to_bytes(), src).await {
-                    error!("MIDI: Failed to send clock sync count 1 to {}: {}", src, e);
+                    error!("MIDI: Failed to send clock sync count 2 to {}: {}", src, e);
                 } else {
-                    debug!("MIDI: Sent clock sync count 1 to {}", src);
+                    debug!("MIDI: Sent clock sync count 2 to {}", src);
                 }
             }
             2 => {
@@ -356,31 +359,9 @@ impl RtpMidiSession {
         }
     }
 
-    pub async fn remove_stale(&self) {
-        let mut participants = self.participants.lock().await;
-        let now = Instant::now();
-        let before = participants.len();
-        // Only remove stale participants that we invited
-        participants.retain(|_, p| {
-            if p.is_invited_by_us() {
-                now.duration_since(p.last_clock_sync()) < Duration::from_secs(30)
-            } else {
-                true // Keep participants not invited by us
-            }
-        });
-        let after = participants.len();
-        if before != after {
-            info!("Removed {} stale participant(s)", before - after);
-        }
-    }
-
-    pub async fn all_participants(&self) -> Vec<Participant> {
-        let participants = self.participants.lock().await;
-        participants.values().cloned().collect()
-    }
-
     pub async fn send_midi_batch(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
-        let participants = self.all_participants().await;
+        let lock = self.participants.lock().await;
+        let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
         let packet = MidiPacket::new(
             *seq,                                            // Sequence number
@@ -420,7 +401,6 @@ impl RtpMidiSession {
     }
 
     pub async fn start_host_clock_sync(&self) {
-        use tokio::time::{Duration, sleep};
         let midi_socket = self.midi_socket.clone();
         let participants = self.participants.clone();
         let ssrc = self.ssrc;
@@ -429,38 +409,39 @@ impl RtpMidiSession {
             loop {
                 sleep(Duration::from_secs(10)).await;
 
-                // Remove stale participants that we invited and collect MIDI addresses for clock sync
-                let addrs = {
-                    let mut lock = participants.lock().await;
-                    let before = lock.len();
-                    if before == 0 {
-                        debug!("No participants to sync with");
-                        continue; // No participants to sync with
+                let mut lock = participants.lock().await;
+                let before_count = lock.len();
+                if before_count == 0 {
+                    debug!("No participants to sync with");
+                    continue; // No participants to sync with
+                }
+                lock.retain(|_, p| {
+                    if p.is_invited_by_us() {
+                        Instant::now().duration_since(p.last_clock_sync()) < Duration::from_secs(30)
+                    } else {
+                        true
                     }
-                    lock.retain(|_, p| {
-                        if p.is_invited_by_us() {
-                            Instant::now().duration_since(p.last_clock_sync()) < Duration::from_secs(30)
-                        } else {
-                            true
-                        }
-                    });
-                    let after = lock.len();
-                    let addrs: Vec<_> = lock.values().filter(|p| p.is_invited_by_us()).map(|p| p.midi_port_addr()).collect();
-                    let removed_count = before - after;
-                    if removed_count > 0 {
-                        info!("Removed {} stale participant(s)", removed_count);
-                    }
-                    addrs
-                };
+                });
+                let after_count = lock.len();
+                let removed_count = before_count - after_count;
+                if removed_count > 0 {
+                    info!("Removed {} stale participant(s)", removed_count);
+                }
 
                 let now = Self::current_timestamp(start_time);
                 let clock_sync = ClockSyncPacket::new(0, [now, 0, 0], ssrc);
                 let clock_sync_bytes = clock_sync.to_bytes();
-                let addrs_len = addrs.len();
-                for addr in addrs {
-                    let _ = midi_socket.send_to(&clock_sync_bytes, addr).await;
+                for p in lock.values_mut() {
+                    match midi_socket.send_to(&clock_sync_bytes, p.midi_port_addr()).await {
+                        Ok(_) => {
+                            debug!("Sent clock sync to {}", p.midi_port_addr());
+                            p.received_clock_sync();
+                        }
+                        Err(e) => {
+                            warn!("Failed to send clock sync to {}: {}", p.midi_port_addr(), e);
+                        }
+                    }
                 }
-                debug!("Host: Sent periodic clock sync to {} participants", addrs_len);
             }
         });
     }
