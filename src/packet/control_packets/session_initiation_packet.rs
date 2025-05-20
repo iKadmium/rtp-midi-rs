@@ -39,6 +39,15 @@ impl SessionInitiationPacket {
         })
     }
 
+    pub fn new_termination(initiator_token: u32, sender_ssrc: u32) -> Self {
+        SessionInitiationPacket::Termination(SessionInitiationPacketBody {
+            protocol_version: 2,
+            initiator_token,
+            sender_ssrc,
+            name: None,
+        })
+    }
+
     pub fn read<R: Read>(reader: &mut R, command: &[u8]) -> std::io::Result<Self> {
         let body = SessionInitiationPacketBody::read(reader)?;
 
@@ -67,6 +76,10 @@ impl SessionInitiationPacket {
             SessionInitiationPacket::Rejection(_) => b"NO",
             SessionInitiationPacket::Termination(_) => b"BY",
         }
+    }
+
+    pub fn initiator_token(&self) -> u32 {
+        self.body().initiator_token
     }
 
     pub(crate) fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {

@@ -321,6 +321,7 @@ impl RtpMidiSession {
             1 => {
                 // Remove pending invitation and add as participant if needed
                 let mut invitations = pending_invitations.lock().await;
+                let token = invitations.get(&src).cloned().unwrap();
                 invitations.remove(&src);
                 drop(invitations);
 
@@ -329,7 +330,7 @@ impl RtpMidiSession {
                 if !lock.contains_key(&control_port_addr) {
                     lock.insert(
                         control_port_addr,
-                        Participant::new(control_port_addr, true), // Mark as invited by us
+                        Participant::new(control_port_addr, true, Some(token)), // Mark as invited by us
                     );
                     info!("Added {} as participant after clock sync", control_port_addr);
                 }
@@ -351,7 +352,7 @@ impl RtpMidiSession {
                 info!("MIDI: Clock sync latency estimate: {}ms", latency_estimate);
                 let mut lock = participants.lock().await;
                 let control_port_addr = SocketAddr::new(src.ip(), src.port() - 1); // Use control port address
-                lock.insert(control_port_addr, Participant::new(control_port_addr, false)); // Mark as not invited by us
+                lock.insert(control_port_addr, Participant::new(control_port_addr, false, None)); // Mark as not invited by us
             }
             _ => {
                 error!("MIDI: Unexpected clock sync count {} from {}", packet.count, src);
@@ -402,6 +403,7 @@ impl RtpMidiSession {
 
     pub async fn start_host_clock_sync(&self) {
         let midi_socket = self.midi_socket.clone();
+        let control_socket = self.control_socket.clone();
         let participants = self.participants.clone();
         let ssrc = self.ssrc;
         let start_time = self.start_time;
@@ -415,13 +417,24 @@ impl RtpMidiSession {
                     debug!("No participants to sync with");
                     continue; // No participants to sync with
                 }
-                lock.retain(|_, p| {
-                    if p.is_invited_by_us() {
-                        Instant::now().duration_since(p.last_clock_sync()) < Duration::from_secs(30)
+
+                let stale_participants: Vec<_> = lock
+                    .iter()
+                    .filter(|(_, p)| p.is_invited_by_us() && Instant::now().duration_since(p.last_clock_sync()) >= Duration::from_secs(30))
+                    .map(|(addr, p)| (*addr, p.clone()))
+                    .collect();
+
+                lock.retain(|addr, _| !stale_participants.iter().any(|(stale_addr, _)| stale_addr == addr));
+
+                for (addr, participant) in stale_participants {
+                    let termination_packet = SessionInitiationPacket::new_termination(participant.initiator_token().unwrap(), ssrc);
+                    if let Err(e) = control_socket.send_to(&termination_packet.to_bytes(), addr).await {
+                        warn!("Failed to send end session packet to {}: {}", addr, e);
                     } else {
-                        true
+                        info!("Sent end session packet to {}", addr);
                     }
-                });
+                }
+
                 let after_count = lock.len();
                 let removed_count = before_count - after_count;
                 if removed_count > 0 {
