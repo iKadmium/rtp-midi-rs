@@ -49,6 +49,13 @@ impl ClockSyncPacket {
         writer.write_u64::<BigEndian>(self.timestamps[2])?;
         Ok(Self::SIZE)
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(Self::SIZE);
+        self.write(&mut buffer)
+            .expect("Failed to write ClockSyncPacket");
+        buffer
+    }
 }
 
 #[cfg(test)]

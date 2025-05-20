@@ -18,14 +18,12 @@
 	// "forwardPorts": [],
 	"runArgs": [
 		"-p=5004:5004/udp",
-		"-p=5005:5005/udp"
-		// "--network=host"
+		"-p=5005:5005/udp",
+		//"--network=host"
 	],
 	"customizations": {
 		"vscode": {
-			"extensions": [
-				"Swellaby.vscode-rust-test-adapter"
-			]
+			"extensions": []
 		}
 	}
 	// Use 'postCreateCommand' to run commands after the container is created.

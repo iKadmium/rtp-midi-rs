@@ -47,10 +47,7 @@ impl SessionInitiationPacket {
             b"OK" => Ok(SessionInitiationPacket::Acknowledgment(body)),
             b"NO" => Ok(SessionInitiationPacket::Rejection(body)),
             b"BY" => Ok(SessionInitiationPacket::Termination(body)),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Unknown session initiation command",
-            )),
+            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Unknown session initiation command")),
         }
     }
 
@@ -78,6 +75,12 @@ impl SessionInitiationPacket {
         let mut length = ControlPacket::write_header(writer, command)?;
         length += self.body().write(writer)?;
         Ok(length)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(self.size());
+        self.write(&mut buffer).expect("Failed to write SessionInitiationPacket");
+        buffer
     }
 
     pub fn size(&self) -> usize {
@@ -126,9 +129,7 @@ impl SessionInitiationPacketBody {
 mod tests {
     use std::io::Cursor;
 
-    use crate::packet::control_packets::session_initiation_packet::{
-        SessionInitiationPacket, SessionInitiationPacketBody,
-    };
+    use crate::packet::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
 
     fn get_test_body() -> [u8; 12] {
         [
@@ -179,8 +180,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x02, //version
             0xF8, 0xD1, 0x80, 0xE6, //initiator token
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
-            0x4C, 0x6F, 0x76, 0x65, 0x6C, 0x79, 0x20, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6F, 0x6E,
-            0x00, //name
+            0x4C, 0x6F, 0x76, 0x65, 0x6C, 0x79, 0x20, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6F, 0x6E, 0x00, //name
         ];
 
         let mut cursor = Cursor::new(buffer);
@@ -208,8 +208,7 @@ mod tests {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
         let name = "Lovely Session".to_string();
-        let packet =
-            SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
+        let packet = SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
         if let SessionInitiationPacket::Acknowledgment(body) = packet {
             assert_eq!(body.protocol_version, 2);
             assert_eq!(body.initiator_token, initiator_token);
@@ -225,8 +224,7 @@ mod tests {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
         let name = "Lovely Session".to_string();
-        let packet =
-            SessionInitiationPacket::new_invitation(initiator_token, sender_ssrc, name.clone());
+        let packet = SessionInitiationPacket::new_invitation(initiator_token, sender_ssrc, name.clone());
         if let SessionInitiationPacket::Invitation(body) = packet {
             assert_eq!(body.protocol_version, 2);
             assert_eq!(body.initiator_token, initiator_token);
@@ -242,8 +240,7 @@ mod tests {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
         let name = "Lovely Session".to_string();
-        let packet =
-            SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
+        let packet = SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
         let mut buffer = Vec::new();
         let result = packet.write(&mut buffer);
         assert!(result.is_ok());

@@ -18,12 +18,7 @@ pub struct MidiPacket {
 }
 
 impl MidiPacket {
-    pub(crate) fn new(
-        sequence_number: u16,
-        timestamp: u32,
-        ssrc: u32,
-        commands: &[TimedCommand],
-    ) -> Self {
+    pub(crate) fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &[TimedCommand]) -> Self {
         MidiPacket {
             header: MidiPacketHeader::new(sequence_number, timestamp, ssrc),
             command_list: MidiCommandListBody::new(commands),
@@ -41,13 +36,9 @@ impl MidiPacket {
 
         let command_section_start = reader.position() as usize;
         let command_section_end = command_section_start + command_section_header.length() as usize;
-        let mut command_section_cursor =
-            Cursor::new(&bytes[command_section_start..command_section_end]);
+        let mut command_section_cursor = Cursor::new(&bytes[command_section_start..command_section_end]);
 
-        let command_section = MidiCommandListBody::read(
-            &mut command_section_cursor,
-            command_section_header.flags().z_flag(),
-        )?;
+        let command_section = MidiCommandListBody::read(&mut command_section_cursor, command_section_header.flags().z_flag())?;
         trace!("Parsed command section: {:#?}", command_section);
 
         // let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
@@ -67,11 +58,16 @@ impl MidiPacket {
 
     pub(crate) fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> std::io::Result<usize> {
         let mut bytes_written = self.header.write(writer)?;
-        let command_section_header =
-            MidiCommandListHeader::build_for(&self.command_list, false, z_flag, false);
+        let command_section_header = MidiCommandListHeader::build_for(&self.command_list, false, z_flag, false);
         bytes_written += command_section_header.write(writer)?;
         bytes_written += self.command_list.write(writer, z_flag)?;
         Ok(bytes_written)
+    }
+
+    pub(crate) fn to_bytes(&self, z_flag: bool) -> Vec<u8> {
+        let mut buffer = vec![0; self.size(z_flag)];
+        self.write(&mut Cursor::new(&mut buffer), z_flag).expect("Failed to write MidiPacket");
+        buffer
     }
 
     pub(crate) fn size(&self, z_flag: bool) -> usize {
@@ -124,16 +120,10 @@ mod tests {
 
         let parsed_packet = MidiPacket::from_be_bytes(&bytes).unwrap();
 
-        assert_eq!(
-            packet.header.sequence_number(),
-            parsed_packet.header.sequence_number()
-        );
+        assert_eq!(packet.header.sequence_number(), parsed_packet.header.sequence_number());
         assert_eq!(packet.header.timestamp(), parsed_packet.header.timestamp());
         assert_eq!(packet.header.ssrc(), parsed_packet.header.ssrc());
-        assert_eq!(
-            packet.command_list.commands().len(),
-            parsed_packet.command_list.commands().len()
-        );
+        assert_eq!(packet.command_list.commands().len(), parsed_packet.command_list.commands().len());
         assert_eq!(packet.command_list, parsed_packet.command_list);
     }
 }
