@@ -19,7 +19,7 @@ pub enum MidiCommand {
 impl MidiCommand {
     pub fn size(&self) -> usize {
         match self {
-            MidiCommand::SysEx(data) => data.len(),
+            MidiCommand::SysEx(data) => data.len() + 2,
             MidiCommand::NoteOff { .. } => 2,
             MidiCommand::NoteOn { .. } => 2,
             MidiCommand::PolyphonicKeyPressure { .. } => 2,
@@ -126,12 +126,13 @@ impl MidiCommand {
         Ok(command)
     }
 
-    pub(super) fn write<W: Write>(
-        &self,
-        writer: &mut W,
-        _running_status: Option<u8>, // Marked as unused for SysEx
-    ) -> Result<usize, std::io::Error> {
+    pub(super) fn write<W: Write>(&self, writer: &mut W, running_status: Option<u8>) -> Result<usize, std::io::Error> {
         let mut bytes_written = 0;
+        if running_status.is_none() || self.status() != running_status.unwrap() {
+            writer.write_u8(self.status())?;
+            bytes_written += 1;
+        }
+
         match self {
             MidiCommand::SysEx(data) => {
                 writer.write_u8(0xF0)?;
