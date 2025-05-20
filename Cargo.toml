@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/iKadmium/rtp-midi-rs"
 repository = "https://github.com/iKadmium/rtp-midi-rs"
-include = ["src", "examples", "Cargo.toml", "README.md"]
+include = ["src", "examples", "tests", "Cargo.toml", "README.md"]
 
 [dependencies]
 mdns-sd = { version = "0.13.9", optional = true }
