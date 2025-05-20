@@ -1,4 +1,7 @@
 # rtpmidi
+![Crates.io Version](https://img.shields.io/crates/v/rtpmidi)
+![Crates.io License](https://img.shields.io/crates/l/rtpmidi)
+![Codecov](https://img.shields.io/codecov/c/github/iKadmium/rtp-midi-rs)
 
 This provides functions for working with RTP-MIDI in Rust.
 
