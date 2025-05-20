@@ -321,18 +321,25 @@ impl RtpMidiSession {
             1 => {
                 // Remove pending invitation and add as participant if needed
                 let mut invitations = pending_invitations.lock().await;
-                let token = invitations.get(&src).cloned().unwrap();
+                let token = invitations.get(&src).cloned();
                 invitations.remove(&src);
                 drop(invitations);
 
                 let control_port_addr = SocketAddr::new(src.ip(), src.port() - 1); // Use control port address
                 let mut lock = participants.lock().await;
                 if !lock.contains_key(&control_port_addr) {
+                    if token.is_none() {
+                        error!("MIDI: Received clock sync from {} without a valid token", src);
+                        return;
+                    }
                     lock.insert(
                         control_port_addr,
-                        Participant::new(control_port_addr, true, Some(token)), // Mark as invited by us
+                        Participant::new(control_port_addr, true, token), // Mark as invited by us
                     );
                     info!("Added {} as participant after clock sync", control_port_addr);
+                } else {
+                    lock.get_mut(&control_port_addr).unwrap().received_clock_sync();
+                    debug!("Updated clock sync for existing participant {}", control_port_addr);
                 }
 
                 // Respond with count = 2
@@ -448,7 +455,6 @@ impl RtpMidiSession {
                     match midi_socket.send_to(&clock_sync_bytes, p.midi_port_addr()).await {
                         Ok(_) => {
                             debug!("Sent clock sync to {}", p.midi_port_addr());
-                            p.received_clock_sync();
                         }
                         Err(e) => {
                             warn!("Failed to send clock sync to {}: {}", p.midi_port_addr(), e);
@@ -473,7 +479,9 @@ impl RtpMidiSession {
         let mut locked_pending_invitations = pending_invitations.lock().await;
         if let Some(expected_token) = locked_pending_invitations.get(&src).cloned() {
             if expected_token == ack_token {
-                locked_pending_invitations.remove(&src);
+                if is_control {
+                    locked_pending_invitations.remove(&src);
+                }
                 drop(locked_pending_invitations);
 
                 let response_bytes = match is_control {
@@ -481,22 +489,22 @@ impl RtpMidiSession {
                     false => ClockSyncPacket::new(0, [Self::current_timestamp(start_time), 0, 0], ssrc).to_bytes(),
                 };
 
-                let peer_addr = match is_control {
+                let midi_addr = match is_control {
                     true => SocketAddr::new(src.ip(), src.port() + 1),
                     false => src,
                 };
 
                 if is_control {
                     debug!("Control: Matched Acknowledgment from {} invitation. Sending MIDI port invitation.", src);
-                    if let Err(e) = midi_socket.send_to(&response_bytes, peer_addr).await {
-                        warn!("Control: Failed to send MIDI port invitation to {}: {}", peer_addr, e);
+                    if let Err(e) = midi_socket.send_to(&response_bytes, midi_addr).await {
+                        warn!("Control: Failed to send MIDI port invitation to {}: {}", midi_addr, e);
                     } else {
-                        info!("Control: Sent MIDI port invitation to {} with token {}", peer_addr, expected_token);
-                        pending_invitations.lock().await.insert(peer_addr, expected_token);
+                        info!("Control: Sent MIDI port invitation to {} with token {}", midi_addr, expected_token);
+                        pending_invitations.lock().await.insert(midi_addr, expected_token);
                     }
                 } else {
                     debug!("MIDI: Matched Acknowledgment from {} for MIDI port invitation. Sending Clock Sync.", src);
-                    if let Err(e) = midi_socket.send_to(&response_bytes, peer_addr).await {
+                    if let Err(e) = midi_socket.send_to(&response_bytes, midi_addr).await {
                         warn!("MIDI: Failed to send clock sync to {}: {}", src, e);
                     } else {
                         info!("MIDI: Sent clock sync to {}", src);

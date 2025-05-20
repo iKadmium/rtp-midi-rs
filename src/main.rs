@@ -56,7 +56,7 @@ async fn main() {
     let invite_server = server.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let addr = std::net::SocketAddr::new("192.168.0.42".parse().unwrap(), 5006);
+        let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
         if let Err(e) = invite_server.invite_participant(addr).await {
             info!("Failed to invite participant: {}", e);
         } else {
