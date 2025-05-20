@@ -68,15 +68,34 @@ async fn main() {
         })
     };
 
-    // Invite 192.168.0.28:5006 after server starts
     let invite_server = server.clone();
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let addr = std::net::SocketAddr::new("192.168.0.28".parse().unwrap(), 5006);
+        let addr = std::net::SocketAddr::new("172.20.80.1".parse().unwrap(), 5006);
         if let Err(e) = invite_server.invite_participant(addr).await {
             info!("Failed to invite participant: {}", e);
         } else {
-            info!("Invitation sent to 192.168.0.28:5006");
+            info!("Invitation sent to participant at {}", addr);
+        }
+    })
+    .await
+    .ok();
+
+    let send_server = server.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        let commands = vec![TimedCommand::new(
+            None,
+            MidiCommand::NoteOn {
+                channel: 0,
+                key: 60,
+                velocity: 127,
+            },
+        )];
+        if let Err(e) = send_server.send_midi_batch(&commands).await {
+            info!("Failed to send MIDI batch: {}", e);
+        } else {
+            info!("MIDI batch sent successfully");
         }
     })
     .await
