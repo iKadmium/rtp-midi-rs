@@ -45,7 +45,6 @@ jobs:
           #   auth
           #   docs
           #   # etc.
-          subjectPattern: '^[A-Z].*$' # enforce subject starts with capital letter etc.
 
       - uses: marocchino/sticky-pull-request-comment@v2
         # When the previous steps fails, the workflow would stop. By adding this
