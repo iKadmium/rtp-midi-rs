@@ -1,12 +1,16 @@
-name: Enforce Conventional PR Titles
+name: Lint PR
 
 on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
 
+permissions:
+  pull-requests: write
+
 jobs:
   check-pr-title:
     runs-on: ubuntu-latest
+    name: Validate PR title
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +46,6 @@ jobs:
           #   docs
           #   # etc.
           subjectPattern: '^[a-z]+(\([a-z]+\))?: [A-Z].*$' # enforce subject starts with capital letter etc.
-          enforce-breaking-change: true # Ensures 'BREAKING CHANGE:' is present for major bumps
 
       - uses: marocchino/sticky-pull-request-comment@v2
         # When the previous steps fails, the workflow would stop. By adding this
