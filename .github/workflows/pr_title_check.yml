@@ -12,6 +12,9 @@ jobs:
 
       - name: Validate PR title with Conventional Commits
         uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
         with:
           # Define your allowed commit types and scopes here
           # By default, it checks against common Conventional Commit types (feat, fix, docs, chore, etc.)
@@ -36,5 +39,5 @@ jobs:
           #   auth
           #   docs
           #   # etc.
-          subject-pattern: '^[a-z]+(\([a-z]+\))?: [A-Z].*$' # enforce subject starts with capital letter etc.
+          subjectPattern: '^[a-z]+(\([a-z]+\))?: [A-Z].*$' # enforce subject starts with capital letter etc.
           enforce-breaking-change: true # Ensures 'BREAKING CHANGE:' is present for major bumps
