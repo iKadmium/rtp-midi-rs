@@ -33,7 +33,7 @@ impl ClockSyncPacket {
         let mut timestamps = [0; 3];
 
         for i in timestamps.iter_mut() {
-            *i = 0;
+            *i = reader.read_u64::<BigEndian>()?;
         }
 
         Ok(ClockSyncPacket::new(count, timestamps, sender_ssrc))
