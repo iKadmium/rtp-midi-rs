@@ -1,7 +1,4 @@
 #[cfg(feature = "examples")]
-use tokio; // Add tokio runtime for async main
-
-#[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
     use log::info;

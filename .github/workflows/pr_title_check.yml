@@ -1,0 +1,40 @@
+name: Enforce Conventional PR Titles
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+jobs:
+  check-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate PR title with Conventional Commits
+        uses: amannn/action-semantic-pull-request@v5
+        with:
+          # Define your allowed commit types and scopes here
+          # By default, it checks against common Conventional Commit types (feat, fix, docs, chore, etc.)
+          # You can customize it further if needed.
+          # Example:
+          types: |
+            feat
+            fix
+            docs
+            chore
+            refactor
+            perf
+            style
+            test
+            build
+            ci
+            revert
+          # scopes: |
+          #   api
+          #   ui
+          #   database
+          #   auth
+          #   docs
+          #   # etc.
+          subject-pattern: '^[a-z]+(\([a-z]+\))?: [A-Z].*$' # enforce subject starts with capital letter etc.
+          enforce-breaking-change: true # Ensures 'BREAKING CHANGE:' is present for major bumps

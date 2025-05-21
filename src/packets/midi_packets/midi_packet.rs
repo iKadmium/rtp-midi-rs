@@ -26,7 +26,7 @@ impl MidiPacket {
         }
     }
 
-    pub(in crate::packet) fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
+    pub(in crate::packets) fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
         let mut reader = Cursor::new(bytes);
 
         let header = MidiPacketHeader::read(&mut reader)?;
@@ -35,7 +35,7 @@ impl MidiPacket {
         let command_section_header = MidiCommandListHeader::read(&mut reader)?;
 
         let command_section_start = reader.position() as usize;
-        let command_section_end = command_section_start + command_section_header.length() as usize;
+        let command_section_end = command_section_start + command_section_header.length();
         let mut command_section_cursor = Cursor::new(&bytes[command_section_start..command_section_end]);
 
         let command_section = MidiCommandListBody::read(&mut command_section_cursor, command_section_header.flags().z_flag())?;
@@ -74,7 +74,7 @@ impl MidiPacket {
         let command_section_size = self.command_list.size(z_flag);
         let needs_b_flag = MidiCommandListFlags::needs_b_flag(command_section_size);
         let command_section_header_size = MidiCommandListHeader::size(needs_b_flag);
-        return size_of::<MidiPacketHeader>() + command_section_header_size + command_section_size;
+        size_of::<MidiPacketHeader>() + command_section_header_size + command_section_size
     }
 
     pub fn commands(&self) -> &[TimedCommand] {
@@ -97,8 +97,8 @@ impl MidiPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::midi_packets::midi_command::MidiCommand;
-    use crate::packet::midi_packets::midi_timed_command::TimedCommand;
+    use crate::packets::midi_packets::midi_command::MidiCommand;
+    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 
     #[test]
     fn test_midi_packet() {

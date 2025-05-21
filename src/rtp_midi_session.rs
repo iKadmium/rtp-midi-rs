@@ -1,5 +1,6 @@
 use log::{debug, error, info, trace, warn};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,20 +12,23 @@ use tokio::time::sleep;
 #[cfg(feature = "mdns")]
 use mdns_sd::{ServiceDaemon, ServiceInfo};
 
-use crate::packet::control_packets::clock_sync_packet::ClockSyncPacket;
-use crate::packet::control_packets::control_packet::ControlPacket;
-use crate::packet::control_packets::session_initiation_packet::SessionInitiationPacket;
-use crate::packet::midi_packets::midi_command::MidiCommand;
-use crate::packet::midi_packets::midi_packet::MidiPacket;
-use crate::packet::midi_packets::midi_timed_command::TimedCommand;
-use crate::packet::packet::RtpMidiPacket;
+use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
+use crate::packets::control_packets::control_packet::ControlPacket;
+use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacket;
+use crate::packets::midi_packets::midi_command::MidiCommand;
+use crate::packets::midi_packets::midi_packet::MidiPacket;
+use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
+
+type ListenerSet = HashMap<RtpMidiEventType, Box<dyn Fn(MidiPacket) + Send>>;
+type InviteHandler = dyn Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync;
 
 pub struct RtpMidiSession {
     name: String,
     ssrc: u32,
     start_time: Instant, // Added start_time
-    listeners: Arc<Mutex<HashMap<RtpMidiEventType, Box<dyn Fn(MidiPacket) + Send>>>>,
+    listeners: Arc<Mutex<ListenerSet>>,
     participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
     sequence_number: Arc<Mutex<u16>>,
     midi_socket: Arc<UdpSocket>,
@@ -37,19 +41,44 @@ pub enum RtpMidiEventType {
     MidiPacket,
 }
 
+#[derive(Clone)]
+pub struct SessionContext {
+    pub name: String,
+    pub ssrc: u32,
+    pub start_time: Instant,
+    pub participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
+    pub pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
+    pub midi_socket: Arc<UdpSocket>,
+    pub control_socket: Arc<UdpSocket>,
+}
+
 impl RtpMidiSession {
     pub async fn new(name: String, ssrc: u32, port: u16) -> std::io::Result<Self> {
+        let control_socket = Arc::new(UdpSocket::bind(("0.0.0.0", port)).await?);
+        let midi_socket = Arc::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?);
         Ok(Self {
             name,
             ssrc,
-            start_time: Instant::now(), // Initialize start_time
+            start_time: Instant::now(),
             listeners: Arc::new(Mutex::new(HashMap::new())),
             participants: Arc::new(Mutex::new(HashMap::new())),
             sequence_number: Arc::new(Mutex::new(0)),
-            control_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port)).await?), // Removed Mutex::new()
-            midi_socket: Arc::new(UdpSocket::bind(("0.0.0.0", port + 1)).await?),
-            pending_invitations: Arc::new(Mutex::new(HashMap::new())), // Initialize pending_invitations
+            control_socket: control_socket.clone(),
+            midi_socket: midi_socket.clone(),
+            pending_invitations: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    pub fn session_context(&self) -> SessionContext {
+        SessionContext {
+            name: self.name.clone(),
+            ssrc: self.ssrc,
+            start_time: self.start_time,
+            participants: Arc::clone(&self.participants),
+            pending_invitations: Arc::clone(&self.pending_invitations),
+            midi_socket: Arc::clone(&self.midi_socket),
+            control_socket: Arc::clone(&self.control_socket),
+        }
     }
 
     pub fn accept_all_invitations(_packet: &SessionInitiationPacket, _socket: &SocketAddr) -> bool {
@@ -78,35 +107,13 @@ impl RtpMidiSession {
         // Advertise the service on mDNS
         Self::advertise_mdns(&self.name.clone(), self.control_socket.local_addr()?.port()).expect("Failed to advertise service");
 
-        let session_name = self.name.clone();
         let listeners_midi = Arc::clone(&self.listeners);
-        let participants_clone_control = Arc::clone(&self.participants); // Renamed for clarity
-        let participants_clone_midi = Arc::clone(&self.participants); // Renamed for clarity
         let session_seq = Arc::clone(&self.sequence_number);
-        let start_time = self.start_time; // Capture start_time
         let invite_handler = Arc::new(invite_handler);
 
-        let control_task = task::spawn(Self::listen_for_control(
-            self.control_socket.clone(),
-            self.midi_socket.clone(),
-            session_name.clone(),
-            self.ssrc,
-            participants_clone_control,
-            start_time,
-            self.pending_invitations.clone(),
-            invite_handler.clone(),
-        ));
-
-        let midi_task = task::spawn(Self::listen_for_midi(
-            self.midi_socket.clone(),
-            session_name,
-            self.ssrc,
-            listeners_midi,
-            participants_clone_midi,
-            session_seq,
-            start_time, // Pass start_time
-            self.pending_invitations.clone(),
-        ));
+        let ctx = self.session_context();
+        let control_task = task::spawn(Self::listen_for_control(ctx.clone(), invite_handler.clone()));
+        let midi_task = task::spawn(Self::listen_for_midi(ctx, listeners_midi, session_seq));
 
         println!("RTP MIDI server starting");
 
@@ -142,19 +149,10 @@ impl RtpMidiSession {
         Ok(())
     }
 
-    async fn listen_for_control(
-        socket: Arc<UdpSocket>,
-        midi_socket: Arc<UdpSocket>,
-        name: String,
-        ssrc: u32,
-        participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
-        start_time: Instant,
-        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
-        invite_handler: Arc<dyn Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync>,
-    ) {
+    async fn listen_for_control(ctx: SessionContext, invite_handler: Arc<InviteHandler>) {
         let mut buf = [0; 65535];
         loop {
-            match socket.recv_from(&mut buf).await {
+            match ctx.control_socket.recv_from(&mut buf).await {
                 Ok((amt, src)) => {
                     trace!("Control: Received {} bytes from {}", amt, src);
                     match ControlPacket::from_be_bytes(&buf[..amt]) {
@@ -166,33 +164,24 @@ impl RtpMidiSession {
                                         let accept = (invite_handler)(&session_initiation_packet, &src);
                                         if accept {
                                             info!("Control: Accepted session initiation from {}", src);
-                                            Self::send_invitation_response(&socket, src, ssrc, invitation.initiator_token, &name).await;
+                                            Self::send_invitation_response(&ctx.control_socket, src, ctx.ssrc, invitation.initiator_token, &ctx.name).await;
                                         } else {
                                             info!("Control: Rejected session initiation from {}", src);
-                                            let rejection_packet = SessionInitiationPacket::new_rejection(invitation.initiator_token, ssrc, name.clone());
-                                            let _ = socket.send_to(&rejection_packet.to_bytes(), src).await;
+                                            let rejection_packet =
+                                                SessionInitiationPacket::new_rejection(invitation.initiator_token, ctx.ssrc, ctx.name.clone());
+                                            let _ = ctx.control_socket.send_to(&rejection_packet.to_bytes(), src).await;
                                         }
                                     }
                                     SessionInitiationPacket::Acknowledgment(ack_body) => {
                                         info!("Control: Received session acknowledgment from {} for token {}", src, ack_body.initiator_token);
-                                        Self::handle_acknowledgment(
-                                            true,
-                                            src,
-                                            ack_body.initiator_token,
-                                            ssrc,
-                                            &name,
-                                            start_time,
-                                            pending_invitations.clone(),
-                                            midi_socket.clone(),
-                                        )
-                                        .await;
+                                        Self::handle_acknowledgment(true, src, ack_body.initiator_token, &ctx).await;
                                     }
                                     SessionInitiationPacket::Rejection(_) => {
                                         info!("Control: Received session rejection from {}", src);
                                     }
                                     SessionInitiationPacket::Termination(_) => {
                                         info!("Control: Received session termination from {}", src);
-                                        Self::handle_end_session(src, &participants);
+                                        Self::handle_end_session(src, &ctx.participants);
                                     }
                                 },
                                 _ => {
@@ -213,20 +202,10 @@ impl RtpMidiSession {
         }
     }
 
-    async fn listen_for_midi(
-        socket: Arc<UdpSocket>, // Changed from Arc<Mutex<UdpSocket>>
-        session_name: String,
-        ssrc: u32,
-        listeners: Arc<Mutex<HashMap<RtpMidiEventType, Box<dyn Fn(MidiPacket) + Send>>>>,
-        participants: Arc<Mutex<HashMap<SocketAddr, Participant>>>,
-        session_seq: Arc<Mutex<u16>>,
-        start_time: Instant, // Added start_time parameter
-        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
-    ) {
+    async fn listen_for_midi(ctx: SessionContext, listeners: Arc<Mutex<ListenerSet>>, session_seq: Arc<Mutex<u16>>) {
         let mut buf = [0; 65535];
         loop {
-            match socket.recv_from(&mut buf).await {
-                // Use socket directly
+            match ctx.midi_socket.recv_from(&mut buf).await {
                 Ok((amt, src)) => {
                     trace!("MIDI: Received {} bytes from {}", amt, src);
                     match RtpMidiPacket::parse(&buf[..amt]) {
@@ -237,21 +216,11 @@ impl RtpMidiSession {
                                     ControlPacket::SessionInitiation(session_initiation_packet) => match session_initiation_packet {
                                         SessionInitiationPacket::Invitation(invitation) => {
                                             info!("MIDI: Received session invitation from {}", src);
-                                            Self::send_invitation_response(&socket, src, ssrc, invitation.initiator_token, &session_name).await;
+                                            Self::send_invitation_response(&ctx.midi_socket, src, ctx.ssrc, invitation.initiator_token, &ctx.name).await;
                                         }
                                         SessionInitiationPacket::Acknowledgment(ack_body) => {
                                             info!("MIDI: Received session acknowledgment from {} for token {}", src, ack_body.initiator_token);
-                                            Self::handle_acknowledgment(
-                                                false,
-                                                src,
-                                                ack_body.initiator_token,
-                                                ssrc,
-                                                &session_name,
-                                                start_time,
-                                                pending_invitations.clone(),
-                                                socket.clone(),
-                                            )
-                                            .await;
+                                            Self::handle_acknowledgment(false, src, ack_body.initiator_token, &ctx).await;
                                         }
                                         _ => {
                                             warn!("MIDI: Unhandled session initiation packet {:?}", session_initiation_packet);
@@ -259,22 +228,20 @@ impl RtpMidiSession {
                                     },
                                     ControlPacket::ClockSync(clock_sync_packet) => {
                                         debug!("MIDI: Received clock sync from {}", src);
-                                        // Always delegate to handle_clock_sync for further protocol
                                         Self::handle_clock_sync(
-                                            &socket, // Pass &socket (Arc derefs to UdpSocket)
+                                            &ctx.midi_socket,
                                             clock_sync_packet,
                                             src,
-                                            ssrc,
-                                            participants.clone(),
-                                            start_time, // Pass start_time
-                                            pending_invitations.clone(),
+                                            ctx.ssrc,
+                                            ctx.participants.clone(),
+                                            ctx.start_time,
+                                            ctx.pending_invitations.clone(),
                                         )
                                         .await;
                                     }
                                 },
                                 RtpMidiPacket::Midi(midi_packet) => {
                                     debug!("MIDI: Parsed MIDI packet: {:#?}", midi_packet);
-                                    // Update sequence number on receive
                                     let mut seq = session_seq.lock().await;
                                     *seq = midi_packet.sequence_number().wrapping_add(1);
                                     if let Some(callback) = listeners.lock().await.get(&RtpMidiEventType::MidiPacket) {
@@ -346,19 +313,18 @@ impl RtpMidiSession {
 
                 let control_port_addr = SocketAddr::new(src.ip(), src.port() - 1); // Use control port address
                 let mut lock = participants.lock().await;
-                if !lock.contains_key(&control_port_addr) {
+                // Check if the participant is already in the list
+                let entry = lock.entry(control_port_addr);
+                if let Entry::Occupied(mut entry) = entry {
+                    entry.get_mut().received_clock_sync();
+                    debug!("MIDI: Updated clock sync for existing participant {}", control_port_addr);
+                } else if let Entry::Vacant(entry) = entry {
                     if token.is_none() {
                         error!("MIDI: Received clock sync from {} without a valid token", src);
                         return;
                     }
-                    lock.insert(
-                        control_port_addr,
-                        Participant::new(control_port_addr, true, token), // Mark as invited by us
-                    );
                     info!("Added {} as participant after clock sync", control_port_addr);
-                } else {
-                    lock.get_mut(&control_port_addr).unwrap().received_clock_sync();
-                    debug!("Updated clock sync for existing participant {}", control_port_addr);
+                    entry.insert(Participant::new(control_port_addr, true, token)); // Mark as not invited by us
                 }
 
                 // Respond with count = 2
@@ -484,46 +450,34 @@ impl RtpMidiSession {
         });
     }
 
-    async fn handle_acknowledgment(
-        is_control: bool,
-        src: SocketAddr,
-        ack_token: u32,
-        ssrc: u32,
-        name: &str,
-        start_time: Instant,
-        pending_invitations: Arc<Mutex<HashMap<SocketAddr, u32>>>,
-        midi_socket: Arc<UdpSocket>,
-    ) {
+    async fn handle_acknowledgment(is_control: bool, src: SocketAddr, ack_token: u32, ctx: &SessionContext) {
         let label = if is_control { "Control" } else { "MIDI" };
-        let mut locked_pending_invitations = pending_invitations.lock().await;
+        let mut locked_pending_invitations = ctx.pending_invitations.lock().await;
         if let Some(expected_token) = locked_pending_invitations.get(&src).cloned() {
             if expected_token == ack_token {
                 if is_control {
                     locked_pending_invitations.remove(&src);
                 }
                 drop(locked_pending_invitations);
-
                 let response_bytes = match is_control {
-                    true => SessionInitiationPacket::new_invitation(expected_token, ssrc, name.to_string()).to_bytes(),
-                    false => ClockSyncPacket::new(0, [Self::current_timestamp(start_time), 0, 0], ssrc).to_bytes(),
+                    true => SessionInitiationPacket::new_invitation(expected_token, ctx.ssrc, ctx.name.clone()).to_bytes(),
+                    false => ClockSyncPacket::new(0, [Self::current_timestamp(ctx.start_time), 0, 0], ctx.ssrc).to_bytes(),
                 };
-
                 let midi_addr = match is_control {
                     true => SocketAddr::new(src.ip(), src.port() + 1),
                     false => src,
                 };
-
                 if is_control {
                     debug!("Control: Matched Acknowledgment from {} invitation. Sending MIDI port invitation.", src);
-                    if let Err(e) = midi_socket.send_to(&response_bytes, midi_addr).await {
+                    if let Err(e) = ctx.midi_socket.send_to(&response_bytes, midi_addr).await {
                         warn!("Control: Failed to send MIDI port invitation to {}: {}", midi_addr, e);
                     } else {
                         info!("Control: Sent MIDI port invitation to {} with token {}", midi_addr, expected_token);
-                        pending_invitations.lock().await.insert(midi_addr, expected_token);
+                        ctx.pending_invitations.lock().await.insert(midi_addr, expected_token);
                     }
                 } else {
                     debug!("MIDI: Matched Acknowledgment from {} for MIDI port invitation. Sending Clock Sync.", src);
-                    if let Err(e) = midi_socket.send_to(&response_bytes, midi_addr).await {
+                    if let Err(e) = ctx.midi_socket.send_to(&response_bytes, midi_addr).await {
                         warn!("MIDI: Failed to send clock sync to {}: {}", src, e);
                     } else {
                         info!("MIDI: Sent clock sync to {}", src);

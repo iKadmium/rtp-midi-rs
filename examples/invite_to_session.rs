@@ -1,7 +1,4 @@
 #[cfg(feature = "examples")]
-use tokio; // Add tokio runtime for async main
-
-#[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
     use std::sync::Arc;
@@ -27,7 +24,7 @@ async fn main() {
     let _ = tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
-        let _ = invite_server.invite_participant(addr).await.unwrap();
+        invite_server.invite_participant(addr).await.unwrap();
     })
     .await;
 

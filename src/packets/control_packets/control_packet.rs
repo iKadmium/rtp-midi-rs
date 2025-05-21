@@ -16,36 +16,27 @@ impl ControlPacket {
 
     pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
         if buffer.len() < 4 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Buffer too short to be a valid control packet",
-            ));
+            return Err(Error::new(ErrorKind::InvalidData, "Buffer too short to be a valid control packet"));
         }
 
         let command = if buffer[0] == 255 && buffer[1] == 255 {
             &buffer[2..4]
         } else {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid control packet header",
-            ));
+            return Err(Error::new(ErrorKind::InvalidData, "Invalid control packet header"));
         };
         let mut reader = Cursor::new(&buffer[4..]);
         match command {
             b"CK" => {
                 let clock_sync_packet = ClockSyncPacket::read(&mut reader)?;
-                return Ok(ControlPacket::ClockSync(clock_sync_packet));
+                Ok(ControlPacket::ClockSync(clock_sync_packet))
             }
             b"OK" | b"IN" | b"NO" | b"BY" => {
                 let body = SessionInitiationPacket::read(&mut reader, command)?;
-                return Ok(ControlPacket::SessionInitiation(body));
+                Ok(ControlPacket::SessionInitiation(body))
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
-                format!(
-                    "Unknown control packet, {}",
-                    String::from_utf8_lossy(command)
-                ),
+                format!("Unknown control packet, {}", String::from_utf8_lossy(command)),
             ))?,
         }
     }
@@ -89,7 +80,7 @@ mod tests {
     fn test_write_header() {
         let mut buffer = Vec::new();
         let command = b"CK";
-        let result = ControlPacket::write_header(&mut buffer, &command);
+        let result = ControlPacket::write_header(&mut buffer, command);
         assert!(result.is_ok());
         assert_eq!(buffer, vec![255, 255, 67, 75]);
     }

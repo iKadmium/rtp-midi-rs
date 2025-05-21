@@ -86,8 +86,9 @@ impl MidiCommand {
         };
         let channel = status & 0x0F;
         let size = MidiCommand::size_from_status(status);
-        for i in data_bytes_read..size {
-            data[i] = reader.read_u8()?;
+
+        for byte in data[data_bytes_read..size].iter_mut() {
+            *byte = reader.read_u8()?;
         }
 
         let command = match status & 0xF0 {

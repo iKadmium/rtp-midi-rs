@@ -159,7 +159,7 @@ impl SessionInitiationPacketBody {
 mod tests {
     use std::io::Cursor;
 
-    use crate::packet::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
+    use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
 
     fn get_test_body() -> [u8; 12] {
         [

@@ -1,6 +1,4 @@
-use super::{
-    control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket,
-};
+use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket};
 
 #[derive(Debug)]
 pub enum RtpMidiPacket {
@@ -11,9 +9,9 @@ pub enum RtpMidiPacket {
 impl RtpMidiPacket {
     pub fn parse(bytes: &[u8]) -> Result<Self, std::io::Error> {
         if ControlPacket::is_control_packet(bytes) {
-            return ControlPacket::from_be_bytes(bytes).map(RtpMidiPacket::Control);
+            ControlPacket::from_be_bytes(bytes).map(RtpMidiPacket::Control)
         } else {
-            return MidiPacket::from_be_bytes(bytes).map(RtpMidiPacket::Midi);
+            MidiPacket::from_be_bytes(bytes).map(RtpMidiPacket::Midi)
         }
     }
 }
@@ -21,9 +19,9 @@ impl RtpMidiPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::control_packets::session_initiation_packet::SessionInitiationPacket;
-    use crate::packet::midi_packets::midi_command::MidiCommand;
-    use crate::packet::midi_packets::midi_timed_command::TimedCommand;
+    use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacket;
+    use crate::packets::midi_packets::midi_command::MidiCommand;
+    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 
     #[test]
     fn test_parse_midi_packet() {
