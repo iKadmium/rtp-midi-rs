@@ -1,5 +1,5 @@
 # rtpmidi
-![Crates.io Version](https://img.shields.io/crates/v/rtpmidi)
+[![Crates.io Version](https://img.shields.io/crates/v/rtpmidi)](https://crates.io/crates/rtpmidi)
 ![Crates.io License](https://img.shields.io/crates/l/rtpmidi)
 ![Codecov](https://img.shields.io/codecov/c/github/iKadmium/rtp-midi-rs)
 
