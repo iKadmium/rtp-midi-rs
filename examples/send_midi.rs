@@ -1,13 +1,10 @@
 #[cfg(feature = "examples")]
-use tokio; // Add tokio runtime for async main
-
-#[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
     use std::sync::Arc;
 
     use log::info;
-    use rtpmidi::packet::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
+    use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
     use rtpmidi::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
 
     colog::default_builder().filter_level(log::LevelFilter::Trace).init();

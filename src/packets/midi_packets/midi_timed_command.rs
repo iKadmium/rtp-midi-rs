@@ -11,10 +11,7 @@ pub struct TimedCommand {
 
 impl TimedCommand {
     pub fn new(delta_time: Option<DeltaTime>, command: MidiCommand) -> Self {
-        TimedCommand {
-            delta_time,
-            command,
-        }
+        TimedCommand { delta_time, command }
     }
 
     pub fn delta_time(&self) -> Option<&DeltaTime> {
@@ -25,30 +22,14 @@ impl TimedCommand {
         &self.command
     }
 
-    pub(super) fn read<R: Read>(
-        reader: &mut R,
-        running_status: Option<u8>,
-        has_delta_time: bool,
-    ) -> Result<Self, std::io::Error> {
+    pub(super) fn read<R: Read>(reader: &mut R, running_status: Option<u8>, has_delta_time: bool) -> Result<Self, std::io::Error> {
         trace!("Parsing TimedCommand from reader");
-        let delta_time = if has_delta_time {
-            Some(DeltaTime::read(reader)?)
-        } else {
-            None
-        };
+        let delta_time = if has_delta_time { Some(DeltaTime::read(reader)?) } else { None };
         let command = MidiCommand::read(reader, running_status)?;
-        Ok(TimedCommand {
-            delta_time,
-            command,
-        })
+        Ok(TimedCommand { delta_time, command })
     }
 
-    pub(super) fn write<W: Write>(
-        &self,
-        writer: &mut W,
-        running_status: Option<u8>,
-        write_delta_time: bool,
-    ) -> Result<usize, std::io::Error> {
+    pub(super) fn write<W: Write>(&self, writer: &mut W, running_status: Option<u8>, write_delta_time: bool) -> Result<usize, std::io::Error> {
         let mut bytes_written = 0;
 
         if write_delta_time {
@@ -216,9 +197,7 @@ mod tests {
         };
 
         let mut bytes = Vec::new();
-        let _bytes_written = original_timed_command
-            .write(&mut bytes, None, true)
-            .unwrap();
+        let _bytes_written = original_timed_command.write(&mut bytes, None, true).unwrap();
 
         let mut cursor = Cursor::new(bytes);
 

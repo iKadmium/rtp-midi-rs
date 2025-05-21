@@ -13,12 +13,9 @@ impl<R: Read> ReadOptionalStringExt for R {
             match self.read_u8() {
                 Ok(0) => {
                     // Null terminator found
-                    return Ok(Some(String::from_utf8(name_bytes).map_err(|_| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Name contains invalid UTF-8",
-                        )
-                    })?));
+                    return Ok(Some(
+                        String::from_utf8(name_bytes).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Name contains invalid UTF-8"))?,
+                    ));
                 }
                 Ok(byte) => {
                     name_bytes.push(byte);

@@ -12,9 +12,7 @@ pub struct MidiCommandListBody {
 
 impl MidiCommandListBody {
     pub fn new(commands: &[TimedCommand]) -> Self {
-        MidiCommandListBody {
-            commands: commands.to_vec(),
-        }
+        MidiCommandListBody { commands: commands.to_vec() }
     }
 
     pub fn size(&self, z_flag: bool) -> usize {
@@ -23,7 +21,7 @@ impl MidiCommandListBody {
         for (i, command) in self.commands.iter().enumerate() {
             if i > 0 || z_flag {
                 match command.delta_time() {
-                    Some(ref delta_time) => length += delta_time.size(),
+                    Some(delta_time) => length += delta_time.size(),
                     None => {
                         length += 1;
                     }
@@ -40,7 +38,7 @@ impl MidiCommandListBody {
             length += 1; // Extra byte for big header
         }
 
-        return length;
+        length
     }
 
     pub fn commands(&self) -> &[TimedCommand] {
@@ -90,9 +88,9 @@ impl MidiCommandListBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packet::midi_packets::delta_time::DeltaTime;
-    use crate::packet::midi_packets::midi_command::MidiCommand;
-    use crate::packet::midi_packets::midi_timed_command::TimedCommand;
+    use crate::packets::midi_packets::delta_time::DeltaTime;
+    use crate::packets::midi_packets::midi_command::MidiCommand;
+    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 
     #[test]
     fn test_new_and_commands() {

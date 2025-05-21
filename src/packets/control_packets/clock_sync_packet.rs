@@ -32,8 +32,8 @@ impl ClockSyncPacket {
 
         let mut timestamps = [0; 3];
 
-        for i in 0..3 {
-            timestamps[i] = reader.read_u64::<BigEndian>()?;
+        for i in timestamps.iter_mut() {
+            *i = reader.read_u64::<BigEndian>()?;
         }
 
         Ok(ClockSyncPacket::new(count, timestamps, sender_ssrc))
@@ -52,8 +52,7 @@ impl ClockSyncPacket {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(Self::SIZE);
-        self.write(&mut buffer)
-            .expect("Failed to write ClockSyncPacket");
+        self.write(&mut buffer).expect("Failed to write ClockSyncPacket");
         buffer
     }
 }

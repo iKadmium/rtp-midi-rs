@@ -87,12 +87,7 @@ impl MidiCommandListHeader {
 
     pub fn build_for(body: &MidiCommandListBody, j_flag: bool, z_flag: bool, p_flag: bool) -> Self {
         let length = body.size(z_flag);
-        let flags = MidiCommandListFlags::new(
-            MidiCommandListFlags::needs_b_flag(length),
-            j_flag,
-            z_flag,
-            p_flag,
-        );
+        let flags = MidiCommandListFlags::new(MidiCommandListFlags::needs_b_flag(length), j_flag, z_flag, p_flag);
         Self::new(flags, length)
     }
 
@@ -100,8 +95,7 @@ impl MidiCommandListHeader {
         if self.flags.b_flag() {
             // If b_flag is set, use 12 bits for length and 4 bits for flags
             // Set the high bit to indicate extended length
-            let flags_and_length: u16 =
-                0x8000 | ((self.flags.flags as u16) << 8) | ((self.length as u16) & 0x0FFF);
+            let flags_and_length: u16 = 0x8000 | ((self.flags.flags as u16) << 8) | ((self.length as u16) & 0x0FFF);
             writer.write_u16::<BigEndian>(flags_and_length)?;
             Ok(2)
         } else {
@@ -139,8 +133,7 @@ mod tests {
     #[test]
     fn test_midi_command_list_header() {
         let mut buffer = Vec::new();
-        let header =
-            MidiCommandListHeader::new(MidiCommandListFlags::new(true, false, true, false), 0x123);
+        let header = MidiCommandListHeader::new(MidiCommandListFlags::new(true, false, true, false), 0x123);
         header.write(&mut buffer).unwrap();
 
         let mut cursor = Cursor::new(buffer);
