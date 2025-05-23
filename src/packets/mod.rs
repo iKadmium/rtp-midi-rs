@@ -1,3 +1,3 @@
-pub mod control_packets;
+pub(crate) mod control_packets;
 pub mod midi_packets;
-pub mod packet;
+pub(crate) mod packet;

@@ -1,35 +1,21 @@
+use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+use std::sync::Arc;
+
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use std::sync::Arc;
+    colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    use rtpmidi::rtp_midi_session::RtpMidiSession;
+    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321));
+    server
+        .start(5004, RtpMidiSession::accept_all_invitations)
+        .await
+        .expect("Error while running the server");
 
-    colog::default_builder().filter_level(log::LevelFilter::Trace).init();
+    let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
+    server.invite_participant(addr).await.unwrap();
 
-    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321, 5004).await.unwrap());
-
-    // Start the server in a background task
-    let server_task = {
-        let server = server.clone();
-        tokio::spawn(async move {
-            server
-                .start(RtpMidiSession::accept_all_invitations)
-                .await
-                .expect("Error while running the server");
-        })
-    };
-
-    let invite_server = server.clone();
-    let _ = tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
-        invite_server.invite_participant(addr).await.unwrap();
-    })
-    .await;
-
-    // Wait for the server task to complete (keeps process alive)
-    let _ = server_task.await;
+    tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }
 
 #[cfg(not(feature = "examples"))]

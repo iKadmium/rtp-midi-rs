@@ -17,7 +17,7 @@ pub enum MidiCommand {
 }
 
 impl MidiCommand {
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         match self {
             MidiCommand::SysEx(data) => data.len() + 2,
             MidiCommand::NoteOff { .. } => 2,
@@ -30,7 +30,7 @@ impl MidiCommand {
         }
     }
 
-    pub fn status(&self) -> u8 {
+    pub(crate) fn status(&self) -> u8 {
         match self {
             MidiCommand::SysEx(_) => 0xF0,
             MidiCommand::NoteOff { channel, .. } => 0x80 | (channel & 0x0F),
@@ -43,7 +43,7 @@ impl MidiCommand {
         }
     }
 
-    pub fn size_from_status(status: u8) -> usize {
+    fn size_from_status(status: u8) -> usize {
         match status & 0xF0 {
             0x80 => 2, // Note Off
             0x90 => 2, // Note On

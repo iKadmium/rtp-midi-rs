@@ -2,11 +2,11 @@
 #[tokio::main]
 async fn main() {
     use log::info;
-    use rtpmidi::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+    use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
 
-    colog::default_builder().filter_level(log::LevelFilter::Trace).init();
+    colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    let server = RtpMidiSession::new("My Session".to_string(), 54321, 5004).await.unwrap();
+    let server = RtpMidiSession::new("My Session".to_string(), 5004);
 
     server
         .add_listener(RtpMidiEventType::MidiPacket, move |data| {
@@ -16,8 +16,9 @@ async fn main() {
         })
         .await;
 
-    // Wait for the server task to complete (keeps process alive)
-    let _ = server.start(RtpMidiSession::accept_all_invitations).await;
+    server.start(5004, RtpMidiSession::accept_all_invitations).await.unwrap();
+
+    tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }
 
 #[cfg(not(feature = "examples"))]

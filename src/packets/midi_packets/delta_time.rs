@@ -2,23 +2,47 @@ use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use std::io::{Read, Write};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeltaTime {
-    delta_time: u32,
+pub(crate) trait ReadDeltaTimeExt: Read {
+    fn read_delta_time(&mut self) -> std::io::Result<u32>;
 }
 
-impl DeltaTime {
-    pub fn new(delta_time: u32) -> Self {
-        DeltaTime { delta_time }
+pub(crate) trait WriteDeltaTimeExt: std::io::Write {
+    fn write_delta_time(&mut self, delta_time: u32) -> std::io::Result<usize>;
+    fn delta_time_size(delta_time: u32) -> usize;
+}
+
+impl<R: Read> ReadDeltaTimeExt for R {
+    fn read_delta_time(&mut self) -> std::io::Result<u32> {
+        let mut delta_time = 0u32;
+        loop {
+            let byte = self.read_u8()?;
+            delta_time = (delta_time << 7) | (byte & 0x7F) as u32;
+            if byte & 0b1000_0000 == 0 {
+                break;
+            }
+        }
+        Ok(delta_time)
+    }
+}
+
+impl<W: Write> WriteDeltaTimeExt for W {
+    fn write_delta_time(&mut self, delta_time: u32) -> std::io::Result<usize> {
+        let num_bytes = Self::delta_time_size(delta_time);
+        let value_to_write = delta_time;
+
+        for i in (0..num_bytes).rev() {
+            let mut byte = ((value_to_write >> (i * 7)) & 0x7F) as u8;
+            if i > 0 {
+                byte |= 0x80; // Set the continuation bit
+            }
+            self.write_u8(byte)?;
+        }
+        Ok(num_bytes)
     }
 
-    pub fn zero() -> Self {
-        DeltaTime { delta_time: 0 }
-    }
-
-    pub fn size(&self) -> usize {
+    fn delta_time_size(delta_time: u32) -> usize {
         let mut size = 0;
-        let mut value = self.delta_time;
+        let mut value = delta_time;
 
         while value > 0 {
             size += 1;
@@ -31,54 +55,25 @@ impl DeltaTime {
 
         size
     }
-
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
-        let num_bytes = self.size();
-        let value_to_write = self.delta_time;
-
-        for i in (0..num_bytes).rev() {
-            // Iterate from num_bytes-1 down to 0
-            let mut byte = ((value_to_write >> (i * 7)) & 0x7F) as u8;
-            if i > 0 {
-                // If this is not the last byte (MSB of value)
-                byte |= 0x80; // Set the continuation bit
-            }
-            writer.write_u8(byte)?;
-        }
-        Ok(num_bytes)
-    }
-
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let mut delta_time = 0u32;
-        loop {
-            let byte = reader.read_u8()?;
-            delta_time = (delta_time << 7) | (byte & 0x7F) as u32;
-            if byte & 0b1000_0000 == 0 {
-                break;
-            }
-        }
-        Ok(DeltaTime::new(delta_time))
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
 
-    fn test_delta_time_rw(delta_time_val: u32, expected_bytes: &[u8]) {
-        let dt = DeltaTime::new(delta_time_val);
+    use super::*;
 
+    fn test_delta_time_rw(delta_time: u32, expected_bytes: &[u8]) {
         // Test writing
         let mut buffer: Vec<u8> = Vec::new();
-        let bytes_written = dt.write(&mut buffer).unwrap();
+        let bytes_written = buffer.write_delta_time(delta_time).unwrap();
         assert_eq!(bytes_written, expected_bytes.len());
         assert_eq!(buffer, expected_bytes);
 
         // Test reading
         let mut reader = Cursor::new(buffer);
-        let read_dt = DeltaTime::read(&mut reader).unwrap();
-        assert_eq!(read_dt, dt);
+        let read_dt = reader.read_delta_time().unwrap();
+        assert_eq!(read_dt, delta_time);
     }
 
     #[test]
@@ -125,13 +120,13 @@ mod tests {
 
     #[test]
     fn test_size_calculation() {
-        assert_eq!(DeltaTime::new(0).size(), 1);
-        assert_eq!(DeltaTime::new(0x7F).size(), 1);
-        assert_eq!(DeltaTime::new(0x80).size(), 2);
-        assert_eq!(DeltaTime::new(0x3FFF).size(), 2);
-        assert_eq!(DeltaTime::new(0x4000).size(), 3);
-        assert_eq!(DeltaTime::new(0x1FFFFF).size(), 3);
-        assert_eq!(DeltaTime::new(0x200000).size(), 4);
-        assert_eq!(DeltaTime::new(0x0FFFFFFF).size(), 4);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0), 1);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x7F), 1);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x80), 2);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x3FFF), 2);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x4000), 3);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x1FFFFF), 3);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x200000), 4);
+        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x0FFFFFFF), 4);
     }
 }

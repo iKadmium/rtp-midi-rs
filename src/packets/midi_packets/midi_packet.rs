@@ -81,16 +81,12 @@ impl MidiPacket {
         self.command_list.commands()
     }
 
-    pub fn sequence_number(&self) -> u16 {
+    pub(crate) fn sequence_number(&self) -> u16 {
         self.header.sequence_number()
     }
 
     pub fn timestamp(&self) -> u32 {
         self.header.timestamp()
-    }
-
-    pub fn ssrc(&self) -> u32 {
-        self.header.ssrc()
     }
 }
 
@@ -122,7 +118,6 @@ mod tests {
 
         assert_eq!(packet.header.sequence_number(), parsed_packet.header.sequence_number());
         assert_eq!(packet.header.timestamp(), parsed_packet.header.timestamp());
-        assert_eq!(packet.header.ssrc(), parsed_packet.header.ssrc());
         assert_eq!(packet.command_list.commands().len(), parsed_packet.command_list.commands().len());
         assert_eq!(packet.command_list, parsed_packet.command_list);
     }

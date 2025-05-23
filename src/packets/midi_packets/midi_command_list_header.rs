@@ -43,9 +43,9 @@ impl MidiCommandListFlags {
         }
     }
 
-    pub fn j_flag(&self) -> bool {
-        self.get_flag(MidiCommandSectionFlagMasks::J)
-    }
+    // pub fn j_flag(&self) -> bool {
+    //     self.get_flag(MidiCommandSectionFlagMasks::J)
+    // }
 
     pub fn b_flag(&self) -> bool {
         self.get_flag(MidiCommandSectionFlagMasks::B)
@@ -53,10 +53,6 @@ impl MidiCommandListFlags {
 
     pub fn z_flag(&self) -> bool {
         self.get_flag(MidiCommandSectionFlagMasks::Z)
-    }
-
-    pub fn p_flag(&self) -> bool {
-        self.get_flag(MidiCommandSectionFlagMasks::P)
     }
 
     pub fn needs_b_flag(size: usize) -> bool {

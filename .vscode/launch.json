@@ -7,16 +7,17 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'rtpmidi'",
+            "name": "Debug unit tests in library 'rtpmidi'",
             "cargo": {
                 "args": [
-                    "build",
-                    "--bin=rtpmidi",
+                    "test",
+                    "--no-run",
+                    "--lib",
                     "--package=rtpmidi"
                 ],
                 "filter": {
                     "name": "rtpmidi",
-                    "kind": "bin"
+                    "kind": "lib"
                 }
             },
             "args": [],
@@ -25,17 +26,149 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'rtpmidi'",
+            "name": "Debug example 'invite_to_session'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=invite_to_session",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "invite_to_session",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'invite_to_session'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=rtpmidi",
+                    "--example=invite_to_session",
                     "--package=rtpmidi"
                 ],
                 "filter": {
-                    "name": "rtpmidi",
-                    "kind": "bin"
+                    "name": "invite_to_session",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'log_messages'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=log_messages",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "log_messages",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'log_messages'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=log_messages",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "log_messages",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug example 'send_midi'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--example=send_midi",
+                    "--package=rtpmidi",
+                    "--features",
+                    "examples"
+                ],
+                "filter": {
+                    "name": "send_midi",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in example 'send_midi'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--example=send_midi",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "send_midi",
+                    "kind": "example"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'integration_test'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=integration_test",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "integration_test",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'mod'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=mod",
+                    "--package=rtpmidi"
+                ],
+                "filter": {
+                    "name": "mod",
+                    "kind": "test"
                 }
             },
             "args": [],
