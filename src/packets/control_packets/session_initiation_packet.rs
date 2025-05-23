@@ -1,4 +1,4 @@
-use crate::util::ReadOptionalStringExt;
+use super::util::ReadOptionalStringExt;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
@@ -111,6 +111,10 @@ impl SessionInitiationPacket {
 
     pub fn ssrc(&self) -> u32 {
         self.body().sender_ssrc
+    }
+
+    pub fn name(&self) -> Option<&String> {
+        self.body().name.as_ref()
     }
 
     pub fn protocol_version(&self) -> u32 {

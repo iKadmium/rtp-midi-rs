@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use log::trace;
 
-use super::midi_timed_command::TimedCommand;
+use super::{delta_time::WriteDeltaTimeExt, midi_timed_command::TimedCommand};
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -21,7 +21,7 @@ impl MidiCommandListBody {
         for (i, command) in self.commands.iter().enumerate() {
             if i > 0 || z_flag {
                 match command.delta_time() {
-                    Some(delta_time) => length += delta_time.size(),
+                    Some(delta_time) => length += <Vec<u8> as WriteDeltaTimeExt>::delta_time_size(delta_time),
                     None => {
                         length += 1;
                     }
@@ -88,7 +88,6 @@ impl MidiCommandListBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::packets::midi_packets::delta_time::DeltaTime;
     use crate::packets::midi_packets::midi_command::MidiCommand;
     use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 
@@ -119,7 +118,7 @@ mod tests {
             velocity: 0,
         };
         let timed1 = TimedCommand::new(None, command1);
-        let timed2 = TimedCommand::new(Some(DeltaTime::zero()), command2);
+        let timed2 = TimedCommand::new(Some(0), command2);
         let body = MidiCommandListBody::new(&[timed1.clone(), timed2.clone()]);
         let size = body.size(false);
         let mut buf = Vec::with_capacity(size);

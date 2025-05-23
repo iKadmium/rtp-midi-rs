@@ -2,7 +2,7 @@ use byteorder::ReadBytesExt;
 use std::io::Read;
 
 // Extension trait to read an optional, null-terminated string
-pub trait ReadOptionalStringExt: Read {
+pub(crate) trait ReadOptionalStringExt: Read {
     fn read_optional_string(&mut self) -> std::io::Result<Option<String>>;
 }
 

@@ -1,8 +1,7 @@
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
-#[allow(dead_code)]
-pub struct MidiPacketHeader {
+pub(super) struct MidiPacketHeader {
     flags: MidiPacketHeaderFlags, // 2 bits for version, 1 bit for p_flag, 1 bit for x_flag, 4 bits for cc, 1 bit for m_flag, 7 bits for pt
     sequence_number: u16,         // Sequence number
     timestamp: u32,               // Lower 32 bits of the timestamp in 100-microsecond units
@@ -95,10 +94,6 @@ impl MidiPacketHeader {
 
     pub fn timestamp(&self) -> u32 {
         self.timestamp
-    }
-
-    pub fn ssrc(&self) -> u32 {
-        self.ssrc
     }
 
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {

@@ -5,58 +5,54 @@ async fn main() {
 
     use log::info;
     use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
-    use rtpmidi::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+    use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
 
-    colog::default_builder().filter_level(log::LevelFilter::Trace).init();
+    colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321, 5004).await.unwrap());
+    let session = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321));
+
+    let session_clone = session.clone();
 
     // Add a listener for incoming MIDI packets
-    let server_clone = server.clone();
-    server
+    session
         .add_listener(RtpMidiEventType::MidiPacket, move |data| {
-            let server_clone = server_clone.clone();
-            tokio::spawn(async move {
-                // Filter for NoteOn commands
-                let commands: Vec<TimedCommand> = data
-                    .commands()
-                    .iter()
-                    .filter_map(|c| match c.command() {
-                        MidiCommand::NoteOn { channel, key, velocity } => Some(TimedCommand::new(
-                            None,
-                            MidiCommand::NoteOn {
-                                channel: *channel,
-                                key: key.saturating_sub(12), // Transpose down by 1 octave
-                                velocity: *velocity,
-                            },
-                        )),
-                        _ => None,
-                    })
-                    .collect();
+            // Filter for NoteOn commands
+            let commands: Vec<TimedCommand> = data
+                .commands()
+                .iter()
+                .filter_map(|c| match c.command() {
+                    // Return a NoteOn command down 1 octave
+                    MidiCommand::NoteOn { channel, key, velocity } => Some(TimedCommand::new(
+                        None,
+                        MidiCommand::NoteOn {
+                            channel: *channel,
+                            key: key.saturating_sub(12),
+                            velocity: *velocity,
+                        },
+                    )),
+                    _ => None,
+                })
+                .collect();
 
-                if !commands.is_empty() {
-                    match server_clone.send_midi_batch(&commands).await {
+            if !commands.is_empty() {
+                let session_clone = session_clone.clone();
+                tokio::spawn(async move {
+                    match session_clone.send_midi_batch(&commands).await {
                         Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
                         Err(e) => info!("Error sending MIDI packet: {:?}", e),
                     };
-                }
-            });
+                });
+            }
         })
         .await;
 
-    // Start the server in a background task
-    let server_task = {
-        let server = server.clone();
-        tokio::spawn(async move {
-            server
-                .start(RtpMidiSession::accept_all_invitations)
-                .await
-                .expect("Error while running the server");
-        })
-    };
+    session
+        .start(5004, RtpMidiSession::accept_all_invitations)
+        .await
+        .expect("Error while running the server");
 
     // Wait for the server task to complete (keeps process alive)
-    let _ = server_task.await;
+    tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }
 
 #[cfg(not(feature = "examples"))]

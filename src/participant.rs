@@ -2,28 +2,26 @@ use std::{net::SocketAddr, time::Instant};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Participant {
-    addr: SocketAddr,
+    ctrl_addr: SocketAddr,
     initiator_token: Option<u32>,
     last_clock_sync: Instant,
+    name: String,
     invited_by_us: bool, // Indicates if the participant was invited by us
 }
 
 impl Participant {
-    pub fn new(addr: SocketAddr, invited_by_us: bool, initiator_token: Option<u32>) -> Self {
+    pub fn new(ctrl_addr: SocketAddr, invited_by_us: bool, initiator_token: Option<u32>, name: String) -> Self {
         Participant {
-            addr,
+            ctrl_addr,
             initiator_token,
+            name,
             last_clock_sync: Instant::now(),
             invited_by_us,
         }
     }
 
-    pub fn control_port_addr(&self) -> SocketAddr {
-        SocketAddr::new(self.addr.ip(), self.addr.port())
-    }
-
     pub fn midi_port_addr(&self) -> SocketAddr {
-        SocketAddr::new(self.addr.ip(), self.addr.port() + 1)
+        SocketAddr::new(self.ctrl_addr.ip(), self.ctrl_addr.port() + 1)
     }
 
     pub fn last_clock_sync(&self) -> Instant {
@@ -40,5 +38,13 @@ impl Participant {
 
     pub fn initiator_token(&self) -> Option<u32> {
         self.initiator_token
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.ctrl_addr
     }
 }

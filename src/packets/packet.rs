@@ -42,7 +42,6 @@ mod tests {
         if let RtpMidiPacket::Midi(parsed_midi_packet) = parsed_packet {
             assert_eq!(parsed_midi_packet.sequence_number(), 1);
             assert_eq!(parsed_midi_packet.timestamp(), 1);
-            assert_eq!(parsed_midi_packet.ssrc(), 1);
             assert_eq!(parsed_midi_packet.commands().len(), 1);
             assert_eq!(
                 parsed_midi_packet.commands()[0].command(),
