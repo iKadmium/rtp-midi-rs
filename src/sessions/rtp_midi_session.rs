@@ -53,7 +53,7 @@ impl RtpMidiSession {
     }
 
     pub async fn start(port: u16, name: &str, ssrc: u32, invite_handler: InviteResponder) -> std::io::Result<Arc<Self>> {
-        advertise_mdns(name, port).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        advertise_mdns(name, port).map_err(|e| std::io::Error::other(e.to_string()))?;
         let ctx = Arc::new(Self::bind(port, name, ssrc).await?);
         ctx.start_threads(invite_handler);
         Ok(ctx)
