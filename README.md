@@ -8,7 +8,9 @@ This provides functions for working with RTP-MIDI in Rust.
 ## Usage
 
 ```rs
-let session = RtpMidiSession::new("My Session".to_string(), 54321, 5004).await.unwrap();
+let port = 5004_u16;
+let ssrc = 123456_u32;
+let session = RtpMidiSession::start(port, "My Session", ssrc, InviteResponse::Accept); // you can choose to accept all invitations, none, or supply a custom handler
 
 // Wait for midi commands
 session
@@ -19,19 +21,15 @@ session
     })
     .await;
 
-// start listening for packets - this can be accept_all_invitations, reject_all_invitations, or a function
-// that takes the form my_function(packet: &SessionInitiationPacket, socket: &SocketAddr) -> bool
-let _ = server.start(RtpMidiSession::accept_all_invitations).await;
-
 // invite another participant to the session
-let addr = std::net::SocketAddr::new("192.168.0.1".parse().unwrap(), 5006);
+let addr = SocketAddr::new("192.168.0.1".parse().unwrap(), 5006);
 let _ = invite_server.invite_participant(addr).await.unwrap();
 
 // send MIDI commands
 let command = MidiCommand::NoteOn {
-    channel: *channel,
-    key: key.saturating_sub(12), // Transpose down by 1 octave
-    velocity: *velocity,
+    channel: 1,
+    key: 64,
+    velocity: 127,
 };
 
 session.send_midi(command).await.unwrap();
@@ -46,7 +44,7 @@ See the Examples directory for more examples.
 ## Status
 
 Supported:  
-* Responding to invitations (currently auto-accepts all invitations)
+* Responding to invitations
 * Inviting others
 * Advertising via MDNS / Bonjour (optional - enable the 'mdns' feature for this)
 * SysEx

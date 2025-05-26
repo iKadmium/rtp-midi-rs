@@ -1,19 +1,25 @@
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
-use std::sync::Arc;
 
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
+    use std::net::SocketAddr;
+
+    use rtpmidi::sessions::invite_response::InviteResponse;
+
     colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321));
-    server
-        .start(5004, RtpMidiSession::accept_all_invitations)
-        .await
-        .expect("Error while running the server");
+    let session = RtpMidiSession::start(
+        5004,
+        "My Session",
+        54321,
+        InviteResponse::new(|packet, _addr| packet.name() == Some("Bob's jam session")),
+    )
+    .await
+    .expect("Failed to start RTP MIDI session");
 
-    let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
-    server.invite_participant(addr).await.unwrap();
+    let addr = SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
+    session.invite_participant(addr).await.unwrap();
 
     tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }

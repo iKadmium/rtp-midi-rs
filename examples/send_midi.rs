@@ -1,15 +1,18 @@
+use log::info;
+use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
+use rtpmidi::sessions::invite_response::InviteResponse;
+use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use std::sync::Arc;
-
-    use log::info;
-    use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
-    use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+    use rtpmidi::sessions::rtp_midi_session::RtpMidiEventType;
 
     colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    let session = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321));
+    let session = RtpMidiSession::start(5004, "My Session", 54321, InviteResponse::Accept)
+        .await
+        .expect("Failed to start RTP-MIDI session");
 
     let session_clone = session.clone();
 
@@ -45,11 +48,6 @@ async fn main() {
             }
         })
         .await;
-
-    session
-        .start(5004, RtpMidiSession::accept_all_invitations)
-        .await
-        .expect("Error while running the server");
 
     // Wait for the server task to complete (keeps process alive)
     tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");

@@ -1,34 +1,27 @@
+mod common;
+
+use common::find_consecutive_ports;
 use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
+use rtpmidi::sessions::invite_response::InviteResponse;
 use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-fn find_consecutive_ports() -> (u16, u16) {
-    loop {
-        let socket = UdpSocket::bind(("0.0.0.0", 0)).unwrap();
-        let port = socket.local_addr().unwrap().port();
-        let next_port = port + 1;
-        if let Ok(socket2) = UdpSocket::bind(("0.0.0.0", next_port)) {
-            drop(socket);
-            drop(socket2);
-            return (port, next_port);
-        }
-    }
-}
-
 #[tokio::test]
 async fn test_two_session_inter_communication() {
-    colog::default_builder().filter_level(log::LevelFilter::Debug).init();
-
     let (control_port_1, _midi_port_1) = find_consecutive_ports();
     let (control_port_2, _midi_port_2) = find_consecutive_ports();
 
     let ssrc1 = 0x11111111;
     let ssrc2 = 0x22222222;
-    let session1 = RtpMidiSession::new("Session1".to_string(), ssrc1);
-    let session2 = RtpMidiSession::new("Session2".to_string(), ssrc2);
+    let session1 = RtpMidiSession::start(control_port_1, "Session1", ssrc1, InviteResponse::Accept)
+        .await
+        .expect("Failed to start RTP MIDI session");
+    let session2 = RtpMidiSession::start(control_port_2, "Session2", ssrc2, InviteResponse::Accept)
+        .await
+        .expect("Failed to start RTP MIDI session");
 
     // Shared state for assertions
     let received_by_1 = Arc::new(Mutex::new(None));
@@ -64,10 +57,6 @@ async fn test_two_session_inter_communication() {
             })
             .await;
     }
-
-    // Start both sessions
-    session1.start(control_port_1, RtpMidiSession::accept_all_invitations).await.unwrap();
-    session2.start(control_port_2, RtpMidiSession::accept_all_invitations).await.unwrap();
 
     // Give the servers a moment to start
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -108,23 +97,4 @@ async fn test_two_session_inter_communication() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let got = received_by_1.lock().await.clone();
     assert_eq!(got, Some(note_off.clone()));
-}
-
-#[tokio::test]
-async fn test_stop_cleanup() {
-    let (control_port, midi_port) = find_consecutive_ports();
-
-    let ssrc = 0x11111111;
-    let session = Arc::new(RtpMidiSession::new("Cleanup".to_string(), ssrc));
-
-    session.start(control_port, RtpMidiSession::accept_all_invitations).await.unwrap();
-    session.stop().await;
-
-    drop(session);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Check if the socket is closed
-    let _control_port_socket = UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, control_port)).expect("Failed to bind control port");
-    let _midi_port_socket = UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, midi_port)).expect("Failed to bind MIDI port");
 }

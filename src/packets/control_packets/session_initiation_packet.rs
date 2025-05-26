@@ -113,8 +113,8 @@ impl SessionInitiationPacket {
         self.body().sender_ssrc
     }
 
-    pub fn name(&self) -> Option<&String> {
-        self.body().name.as_ref()
+    pub fn name(&self) -> Option<&str> {
+        self.body().name.as_deref()
     }
 
     pub fn protocol_version(&self) -> u32 {
