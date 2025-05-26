@@ -4,25 +4,25 @@ use crate::packets::control_packets::session_initiation_packet::SessionInitiatio
 
 pub type InviteHandler = dyn Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync + 'static;
 
-pub enum InviteResponse {
+pub enum InviteResponder {
     Accept,
     Reject,
     Custom(Box<InviteHandler>),
 }
 
-impl InviteResponse {
+impl InviteResponder {
     pub fn handle(&self, packet: &SessionInitiationPacket, addr: &SocketAddr) -> bool {
         match self {
-            InviteResponse::Accept => true,
-            InviteResponse::Reject => false,
-            InviteResponse::Custom(handler) => handler(packet, addr),
+            InviteResponder::Accept => true,
+            InviteResponder::Reject => false,
+            InviteResponder::Custom(handler) => handler(packet, addr),
         }
     }
 
-    pub fn new<F>(handler: F) -> InviteResponse
+    pub fn new<F>(handler: F) -> InviteResponder
     where
         F: Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync + 'static,
     {
-        InviteResponse::Custom(Box::new(handler))
+        InviteResponder::Custom(Box::new(handler))
     }
 }

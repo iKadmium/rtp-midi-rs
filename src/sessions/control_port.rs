@@ -1,5 +1,5 @@
 use super::MAX_UDP_PACKET_SIZE;
-use super::invite_response::InviteResponse;
+use super::invite_responder::InviteResponder;
 use super::rtp_midi_session::RtpMidiSession;
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::control_packet::ControlPacket;
@@ -67,7 +67,7 @@ impl ControlPort {
         Ok(())
     }
 
-    pub async fn start(&self, ctx: &RtpMidiSession, invite_handler: &InviteResponse) {
+    pub async fn start(&self, ctx: &RtpMidiSession, invite_handler: &InviteResponder) {
         let mut buf = [0; MAX_UDP_PACKET_SIZE];
         loop {
             tokio::select! {

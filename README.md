@@ -10,7 +10,7 @@ This provides functions for working with RTP-MIDI in Rust.
 ```rs
 let port = 5004_u16;
 let ssrc = 123456_u32;
-let session = RtpMidiSession::start(port, "My Session", ssrc, InviteResponse::Accept); // you can choose to accept all invitations, none, or supply a custom handler
+let session = RtpMidiSession::start(port, "My Session", ssrc, InviteResponder::Accept); // you can choose to accept all invitations, none, or supply a custom handler
 
 // Wait for midi commands
 session

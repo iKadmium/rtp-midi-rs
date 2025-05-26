@@ -1,5 +1,5 @@
 pub mod control_port;
-pub mod invite_response;
+pub mod invite_responder;
 mod mdns;
 pub mod midi_port;
 pub mod rtp_midi_session;

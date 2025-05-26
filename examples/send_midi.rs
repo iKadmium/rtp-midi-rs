@@ -1,6 +1,6 @@
 use log::info;
 use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
-use rtpmidi::sessions::invite_response::InviteResponse;
+use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 
 #[cfg(feature = "examples")]
@@ -10,7 +10,7 @@ async fn main() {
 
     colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
-    let session = RtpMidiSession::start(5004, "My Session", 54321, InviteResponse::Accept)
+    let session = RtpMidiSession::start(5004, "My Session", 54321, InviteResponder::Accept)
         .await
         .expect("Failed to start RTP-MIDI session");
 

@@ -3,14 +3,14 @@ use common::find_consecutive_ports;
 
 use std::{net::UdpSocket, sync::Arc, time::Duration};
 
-use rtpmidi::sessions::{invite_response::InviteResponse, rtp_midi_session::RtpMidiSession};
+use rtpmidi::sessions::{invite_responder::InviteResponder, rtp_midi_session::RtpMidiSession};
 
 #[tokio::test]
 async fn test_stop_cleanup() {
     let (control_port, midi_port) = find_consecutive_ports();
 
     let ssrc = 0x11111111;
-    let session = RtpMidiSession::start(control_port, "Cleanup", ssrc, InviteResponse::Accept)
+    let session = RtpMidiSession::start(control_port, "Cleanup", ssrc, InviteResponder::Accept)
         .await
         .expect("Failed to start RTP MIDI session");
 
@@ -31,7 +31,7 @@ async fn test_drop_cleanup() {
 
     let ssrc = 0x11111111;
     let session = Arc::new(
-        RtpMidiSession::start(control_port, "Cleanup", ssrc, InviteResponse::Accept)
+        RtpMidiSession::start(control_port, "Cleanup", ssrc, InviteResponder::Accept)
             .await
             .expect("Failed to start RTP MIDI session"),
     );

@@ -2,7 +2,7 @@ mod common;
 
 use common::find_consecutive_ports;
 use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
-use rtpmidi::sessions::invite_response::InviteResponse;
+use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,10 +16,10 @@ async fn test_two_session_inter_communication() {
 
     let ssrc1 = 0x11111111;
     let ssrc2 = 0x22222222;
-    let session1 = RtpMidiSession::start(control_port_1, "Session1", ssrc1, InviteResponse::Accept)
+    let session1 = RtpMidiSession::start(control_port_1, "Session1", ssrc1, InviteResponder::Accept)
         .await
         .expect("Failed to start RTP MIDI session");
-    let session2 = RtpMidiSession::start(control_port_2, "Session2", ssrc2, InviteResponse::Accept)
+    let session2 = RtpMidiSession::start(control_port_2, "Session2", ssrc2, InviteResponder::Accept)
         .await
         .expect("Failed to start RTP MIDI session");
 

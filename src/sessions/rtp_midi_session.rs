@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-use super::invite_response::InviteResponse;
+use super::invite_responder::InviteResponder;
 use super::mdns::advertise_mdns;
 use crate::packets::midi_packets::midi_command::MidiCommand;
 use crate::packets::midi_packets::midi_timed_command::TimedCommand;
@@ -52,14 +52,14 @@ impl RtpMidiSession {
         Ok(context)
     }
 
-    pub async fn start(port: u16, name: &str, ssrc: u32, invite_handler: InviteResponse) -> std::io::Result<Arc<Self>> {
+    pub async fn start(port: u16, name: &str, ssrc: u32, invite_handler: InviteResponder) -> std::io::Result<Arc<Self>> {
         advertise_mdns(name, port).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         let ctx = Arc::new(Self::bind(port, name, ssrc).await?);
         ctx.start_threads(invite_handler);
         Ok(ctx)
     }
 
-    fn start_threads(&self, invite_handler: InviteResponse) {
+    fn start_threads(&self, invite_handler: InviteResponder) {
         let ctx = Arc::new(self.clone());
 
         // Control port listener

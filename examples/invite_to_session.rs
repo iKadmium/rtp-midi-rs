@@ -1,19 +1,17 @@
+use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+use std::net::SocketAddr;
 
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use std::net::SocketAddr;
-
-    use rtpmidi::sessions::invite_response::InviteResponse;
-
     colog::default_builder().filter_level(log::LevelFilter::Info).init();
 
     let session = RtpMidiSession::start(
         5004,
         "My Session",
         54321,
-        InviteResponse::new(|packet, _addr| packet.name() == Some("Bob's jam session")),
+        InviteResponder::new(|packet, _addr| packet.name() == Some("Bob's jam session")),
     )
     .await
     .expect("Failed to start RTP MIDI session");
