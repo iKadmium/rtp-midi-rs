@@ -1,13 +1,20 @@
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use log::info;
     use rtpmidi::sessions::{
         invite_responder::InviteResponder,
         rtp_midi_session::{RtpMidiEventType, RtpMidiSession},
     };
+    use tracing::{Level, event};
+    use tracing_subscriber::util::SubscriberInitExt;
 
-    colog::default_builder().filter_level(log::LevelFilter::Info).init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_target(false)
+        .finish()
+        .init();
 
     let server = RtpMidiSession::start(5004, "My Session", 12345, InviteResponder::Accept)
         .await
@@ -16,7 +23,7 @@ async fn main() {
     server
         .add_listener(RtpMidiEventType::MidiPacket, move |data| {
             for command in data.commands() {
-                info!("Received command: {:?}", command);
+                event!(Level::INFO, "Received command: {:?}", command);
             }
         })
         .await;

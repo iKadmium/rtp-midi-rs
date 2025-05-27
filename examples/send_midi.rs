@@ -1,14 +1,15 @@
-use log::info;
 use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+use tracing::{Level, event};
 
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
     use rtpmidi::sessions::rtp_midi_session::RtpMidiEventType;
+    use tracing_subscriber::util::SubscriberInitExt;
 
-    colog::default_builder().filter_level(log::LevelFilter::Info).init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).with_target(false).finish().init();
 
     let session = RtpMidiSession::start(5004, "My Session", 54321, InviteResponder::Accept)
         .await
@@ -41,8 +42,8 @@ async fn main() {
                 let session_clone = session_clone.clone();
                 tokio::spawn(async move {
                     match session_clone.send_midi_batch(&commands).await {
-                        Ok(_) => info!("MIDI packet sent successfully, {:?}", commands),
-                        Err(e) => info!("Error sending MIDI packet: {:?}", e),
+                        Ok(_) => event!(Level::INFO, "MIDI packet sent successfully, {:?}", commands),
+                        Err(e) => event!(Level::INFO, "Error sending MIDI packet: {:?}", e),
                     };
                 });
             }

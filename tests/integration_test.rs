@@ -3,7 +3,7 @@ mod common;
 use common::find_consecutive_ports;
 use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
 use rtpmidi::sessions::invite_responder::InviteResponder;
-use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,6 +11,8 @@ use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn test_two_session_inter_communication() {
+    use rtpmidi::sessions::rtp_midi_session::RtpMidiEventType;
+
     let (control_port_1, _midi_port_1) = find_consecutive_ports();
     let (control_port_2, _midi_port_2) = find_consecutive_ports();
 
@@ -64,7 +66,7 @@ async fn test_two_session_inter_communication() {
     // Invite each other
     let addr1 = SocketAddr::new("127.0.0.1".parse().unwrap(), control_port_1);
     let addr2 = SocketAddr::new("127.0.0.1".parse().unwrap(), control_port_2);
-    session1.invite_participant(addr2).await.unwrap();
+    session1.invite_participant(addr2).await;
 
     // Wait for sessions to connect
     tokio::time::sleep(Duration::from_secs(1)).await;

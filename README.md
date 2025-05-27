@@ -16,7 +16,7 @@ let session = RtpMidiSession::start(port, "My Session", ssrc, InviteResponder::A
 session
     .add_listener(RtpMidiEventType::MidiPacket, move |data| {
         for command in data.commands() {
-            info!("Received command: {:?}", command);
+            event!(Level::INFO, "Received command: {:?}", command);
         }
     })
     .await;

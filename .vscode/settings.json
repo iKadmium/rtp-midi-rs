@@ -1,8 +1,4 @@
 {
-    "rust-analyzer.cargo.features": [
-        "examples",
-    ],
-    "rust-analyzer.check.features": [
-        "examples",
-    ],
+    "rust-analyzer.cargo.features": "all",
+    "rust-analyzer.check.features": "all",
 }

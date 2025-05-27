@@ -19,7 +19,7 @@
 	"runArgs": [
 		"-p=5004:5004/udp",
 		"-p=5005:5005/udp",
-		//"--network=host"
+		//"-p=5353:5353/udp",
 	],
 	"customizations": {
 		"vscode": {

@@ -1,6 +1,5 @@
 use std::io::{Cursor, Write};
-
-use log::trace;
+use tracing::{Level, event};
 
 use super::{
     midi_command_list_body::MidiCommandListBody,
@@ -30,7 +29,7 @@ impl MidiPacket {
         let mut reader = Cursor::new(bytes);
 
         let header = MidiPacketHeader::read(&mut reader)?;
-        trace!("Parsed header: {:#?}", header);
+        event!(Level::TRACE, "Parsed header: {:#?}", header);
 
         let command_section_header = MidiCommandListHeader::read(&mut reader)?;
 
@@ -39,7 +38,7 @@ impl MidiPacket {
         let mut command_section_cursor = Cursor::new(&bytes[command_section_start..command_section_end]);
 
         let command_section = MidiCommandListBody::read(&mut command_section_cursor, command_section_header.flags().z_flag())?;
-        trace!("Parsed command section: {:#?}", command_section);
+        event!(Level::TRACE, "Parsed command section: {:#?}", command_section);
 
         // let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
         //     let journal_bytes = &bytes[i..];

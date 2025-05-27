@@ -1,5 +1,5 @@
-use log::trace;
 use std::io::{Read, Write};
+use tracing::{Level, event};
 
 use super::{delta_time::ReadDeltaTimeExt, delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
 
@@ -23,7 +23,7 @@ impl TimedCommand {
     }
 
     pub(super) fn read<R: Read>(reader: &mut R, running_status: Option<u8>, has_delta_time: bool) -> Result<Self, std::io::Error> {
-        trace!("Parsing TimedCommand from reader");
+        event!(Level::TRACE, "Parsing TimedCommand from reader");
         let delta_time = if has_delta_time { Some(reader.read_delta_time()?) } else { None };
         let command = MidiCommand::read(reader, running_status)?;
         Ok(TimedCommand { delta_time, command })

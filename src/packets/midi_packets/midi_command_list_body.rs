@@ -1,8 +1,6 @@
-use std::io::{Read, Write};
-
-use log::trace;
-
 use super::{delta_time::WriteDeltaTimeExt, midi_timed_command::TimedCommand};
+use std::io::{Read, Write};
+use tracing::{Level, event};
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -46,7 +44,7 @@ impl MidiCommandListBody {
     }
 
     pub fn read<R: Read>(reader: &mut R, z_flag: bool) -> Result<Self, std::io::Error> {
-        trace!("Parsing MIDI command list from reader");
+        event!(Level::TRACE, "Parsing MIDI command list from reader");
         let mut commands = Vec::new();
 
         let mut running_status: Option<u8> = None;

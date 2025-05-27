@@ -26,3 +26,13 @@ impl InviteResponder {
         InviteResponder::Custom(Box::new(handler))
     }
 }
+
+impl std::fmt::Debug for InviteResponder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InviteResponder::Accept => write!(f, "Accept"),
+            InviteResponder::Reject => write!(f, "Reject"),
+            InviteResponder::Custom(_) => write!(f, "Custom"),
+        }
+    }
+}
