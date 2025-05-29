@@ -111,7 +111,7 @@ impl MidiPort {
                 *seq = midi_packet.sequence_number().wrapping_add(1);
                 if let Some(callback) = listeners.lock().await.get(&RtpMidiEventType::MidiPacket) {
                     for command in midi_packet.commands() {
-                        callback(&command.command());
+                        callback(&command.command().to_owned());
                     }
                 }
             }

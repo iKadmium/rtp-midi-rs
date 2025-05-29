@@ -25,10 +25,12 @@ impl<'a> MidiPacketZeroAlloc<'a> {
         self.header.sequence_number()
     }
 
+    #[allow(dead_code)]
     pub fn timestamp(&self) -> u32 {
         self.header.timestamp()
     }
 
+    #[allow(dead_code)]
     pub fn ssrc(&self) -> u32 {
         self.header.ssrc()
     }

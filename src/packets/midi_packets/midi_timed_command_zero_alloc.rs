@@ -1,4 +1,4 @@
-use super::{delta_time_zero_alloc::DeltaTimeZeroAlloc, midi_command::MidiCommand, midi_command_zero_alloc::MidiCommandZeroAlloc};
+use super::{delta_time_zero_alloc::DeltaTimeZeroAlloc, midi_command_zero_alloc::MidiCommandZeroAlloc};
 
 #[derive(Debug)]
 pub(crate) struct MidiTimedCommandZeroAlloc<'a> {
@@ -19,11 +19,12 @@ impl<'a> MidiTimedCommandZeroAlloc<'a> {
         Ok((MidiTimedCommandZeroAlloc { delta_time, command }, offset + command_size))
     }
 
+    #[allow(dead_code)]
     pub fn delta_time(&self) -> u32 {
         self.delta_time.as_ref().map_or(0, |dt| dt.delta_time())
     }
 
-    pub fn command(&self) -> MidiCommand {
-        self.command.to_owned()
+    pub fn command(&self) -> &MidiCommandZeroAlloc<'a> {
+        &self.command
     }
 }

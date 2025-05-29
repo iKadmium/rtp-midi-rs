@@ -39,8 +39,6 @@ impl TimedCommand {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::*;
 
     #[test]

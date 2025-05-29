@@ -33,10 +33,6 @@ impl MidiCommandListBody {
         length
     }
 
-    pub fn commands(&self) -> &[TimedCommand] {
-        &self.commands
-    }
-
     pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> Result<usize, std::io::Error> {
         let mut offset = 0;
         let mut running_status: Option<u8> = None;
@@ -48,26 +44,5 @@ impl MidiCommandListBody {
         }
 
         Ok(offset)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::packets::midi_packets::midi_command::MidiCommand;
-    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
-
-    #[test]
-    fn test_new_and_commands() {
-        let command = MidiCommand::NoteOn {
-            channel: 1,
-            key: 60,
-            velocity: 100,
-        };
-        let timed_command = TimedCommand::new(None, command);
-        let body = MidiCommandListBody::new(&[timed_command.clone()]);
-        let commands = body.commands();
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0], timed_command);
     }
 }

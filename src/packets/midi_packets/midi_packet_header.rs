@@ -1,5 +1,5 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write};
+use byteorder::{BigEndian, WriteBytesExt};
+use std::io::Write;
 
 pub(super) struct MidiPacketHeader {
     flags: MidiPacketHeaderFlags, // 2 bits for version, 1 bit for p_flag, 1 bit for x_flag, 4 bits for cc, 1 bit for m_flag, 7 bits for pt
@@ -77,9 +77,9 @@ impl From<u16> for MidiPacketHeaderFlags {
     }
 }
 
-impl Into<u16> for MidiPacketHeaderFlags {
-    fn into(self) -> u16 {
-        self.flags
+impl From<MidiPacketHeaderFlags> for u16 {
+    fn from(flags: MidiPacketHeaderFlags) -> u16 {
+        flags.flags
     }
 }
 
@@ -94,28 +94,6 @@ impl MidiPacketHeader {
             timestamp,
             ssrc,
         }
-    }
-
-    pub fn sequence_number(&self) -> u16 {
-        self.sequence_number
-    }
-
-    pub fn timestamp(&self) -> u32 {
-        self.timestamp
-    }
-
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let flags = MidiPacketHeaderFlags::from(reader.read_u16::<BigEndian>()?);
-        let sequence_number = reader.read_u16::<BigEndian>()?;
-        let timestamp = reader.read_u32::<BigEndian>()?;
-        let ssrc = reader.read_u32::<BigEndian>()?;
-
-        Ok(MidiPacketHeader {
-            flags,
-            sequence_number,
-            timestamp,
-            ssrc,
-        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<usize, std::io::Error> {

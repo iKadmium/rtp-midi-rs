@@ -65,25 +65,20 @@ mod tests {
             channel: 0,
         };
         let timed_command = TimedCommand::new(None, command);
+        let timed_comands = &[timed_command];
 
-        let packet = MidiPacketBuilder::new(sequence_number, timestamp, ssrc, &[timed_command]);
+        let packet = MidiPacketBuilder::new(sequence_number, timestamp, ssrc, timed_comands);
 
         let mut bytes = vec![0; packet.size(false)];
         packet.write(&mut Cursor::new(&mut bytes), false).unwrap();
 
         let parsed_packet = MidiPacketZeroAlloc::new(bytes.as_slice()).expect("Failed to parse MIDI packet");
 
-        assert_eq!(packet.header.sequence_number(), parsed_packet.sequence_number());
-        assert_eq!(packet.header.timestamp(), parsed_packet.timestamp());
+        assert_eq!(sequence_number, parsed_packet.sequence_number());
+        assert_eq!(timestamp, parsed_packet.timestamp());
         let parsed_commands: Vec<_> = parsed_packet.commands().collect();
-        assert_eq!(packet.command_list.commands().len(), parsed_commands.len());
-        assert_eq!(
-            *packet.command_list.commands().first().unwrap().command(),
-            parsed_commands.first().unwrap().command()
-        );
-        assert_eq!(
-            packet.command_list.commands().first().unwrap().delta_time(),
-            parsed_commands.first().unwrap().delta_time()
-        );
+        assert_eq!(timed_comands.len(), parsed_commands.len());
+        assert_eq!(timed_comands.first().unwrap().command(), &parsed_commands.first().unwrap().command().to_owned());
+        assert_eq!(timed_comands.first().unwrap().delta_time(), parsed_commands.first().unwrap().delta_time());
     }
 }

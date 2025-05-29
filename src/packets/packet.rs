@@ -47,7 +47,7 @@ mod tests {
             let values = parsed_midi_packet.commands().collect::<Vec<_>>();
             assert_eq!(values.len(), 1);
             assert_eq!(
-                values[0].command(),
+                values[0].command().to_owned(),
                 MidiCommand::NoteOn {
                     channel: 1,
                     key: 64,

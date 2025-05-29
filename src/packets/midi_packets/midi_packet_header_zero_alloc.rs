@@ -16,6 +16,7 @@ impl<'a> MidiPacketHeaderZeroAlloc<'a> {
         Self { data }
     }
 
+    #[allow(dead_code)]
     pub fn flags(&self) -> MidiPacketHeaderFlags {
         MidiPacketHeaderFlags::from(u16::from_be_bytes([self.data[0], self.data[1]]))
     }
@@ -24,10 +25,12 @@ impl<'a> MidiPacketHeaderZeroAlloc<'a> {
         u16::from_be_bytes([self.data[2], self.data[3]])
     }
 
+    #[allow(dead_code)]
     pub fn timestamp(&self) -> u32 {
         u32::from_be_bytes([self.data[4], self.data[5], self.data[6], self.data[7]])
     }
 
+    #[allow(dead_code)]
     pub fn ssrc(&self) -> u32 {
         u32::from_be_bytes([self.data[8], self.data[9], self.data[10], self.data[11]])
     }
