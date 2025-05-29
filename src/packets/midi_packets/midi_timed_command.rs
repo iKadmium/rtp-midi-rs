@@ -1,7 +1,6 @@
-use std::io::{Read, Write};
-use tracing::{Level, event};
+use std::io::Write;
 
-use super::{delta_time::ReadDeltaTimeExt, delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
+use super::{delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimedCommand {

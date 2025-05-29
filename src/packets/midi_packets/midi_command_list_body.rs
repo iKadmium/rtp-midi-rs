@@ -1,6 +1,5 @@
 use super::{delta_time::WriteDeltaTimeExt, midi_timed_command::TimedCommand};
-use std::io::{Read, Write};
-use tracing::{Level, event};
+use std::io::Write;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]

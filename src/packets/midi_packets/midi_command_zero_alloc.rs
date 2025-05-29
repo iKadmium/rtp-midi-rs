@@ -31,7 +31,7 @@ impl<'a> MidiCommandZeroAlloc<'a> {
         let length = MidiCommandZeroAlloc::size_from_status(status);
         let data = &bytes[offset..offset + length];
 
-        Ok((Self { status, data }, offset))
+        Ok((Self { status, data }, offset + length))
     }
 
     pub fn to_owned(&self) -> MidiCommand {

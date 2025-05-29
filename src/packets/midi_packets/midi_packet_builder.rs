@@ -1,5 +1,4 @@
 use std::io::{Cursor, Write};
-use tracing::{Level, event};
 
 use super::{
     midi_command_list_body::MidiCommandListBody,
