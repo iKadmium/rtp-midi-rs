@@ -1,28 +1,9 @@
-use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
-use std::io::{Read, Write};
-
-pub(crate) trait ReadDeltaTimeExt: Read {
-    fn read_delta_time(&mut self) -> std::io::Result<u32>;
-}
+use std::io::Write;
 
 pub(crate) trait WriteDeltaTimeExt: std::io::Write {
     fn write_delta_time(&mut self, delta_time: u32) -> std::io::Result<usize>;
     fn delta_time_size(delta_time: u32) -> usize;
-}
-
-impl<R: Read> ReadDeltaTimeExt for R {
-    fn read_delta_time(&mut self) -> std::io::Result<u32> {
-        let mut delta_time = 0u32;
-        loop {
-            let byte = self.read_u8()?;
-            delta_time = (delta_time << 7) | (byte & 0x7F) as u32;
-            if byte & 0b1000_0000 == 0 {
-                break;
-            }
-        }
-        Ok(delta_time)
-    }
 }
 
 impl<W: Write> WriteDeltaTimeExt for W {
@@ -59,8 +40,6 @@ impl<W: Write> WriteDeltaTimeExt for W {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::*;
 
     fn test_delta_time_rw(delta_time: u32, expected_bytes: &[u8]) {
@@ -69,11 +48,6 @@ mod tests {
         let bytes_written = buffer.write_delta_time(delta_time).unwrap();
         assert_eq!(bytes_written, expected_bytes.len());
         assert_eq!(buffer, expected_bytes);
-
-        // Test reading
-        let mut reader = Cursor::new(buffer);
-        let read_dt = reader.read_delta_time().unwrap();
-        assert_eq!(read_dt, delta_time);
     }
 
     #[test]

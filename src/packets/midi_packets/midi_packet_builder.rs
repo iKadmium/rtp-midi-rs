@@ -1,7 +1,5 @@
 use std::io::{Cursor, Write};
 
-use log::trace;
-
 use super::{
     midi_command_list_body::MidiCommandListBody,
     midi_command_list_header::{MidiCommandListFlags, MidiCommandListHeader},
@@ -11,49 +9,19 @@ use super::{
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct MidiPacket {
+pub struct MidiPacketBuilder<'a> {
     header: MidiPacketHeader,
-    command_list: MidiCommandListBody,
+    command_list: MidiCommandListBody<'a>,
     //recovery_journal: Option<RecoveryJournal>,
 }
 
-impl MidiPacket {
-    pub(crate) fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &[TimedCommand]) -> Self {
-        MidiPacket {
+impl<'a> MidiPacketBuilder<'a> {
+    pub(crate) fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &'a [TimedCommand]) -> Self {
+        MidiPacketBuilder {
             header: MidiPacketHeader::new(sequence_number, timestamp, ssrc),
             command_list: MidiCommandListBody::new(commands),
             //recovery_journal: None,
         }
-    }
-
-    pub(in crate::packets) fn from_be_bytes(bytes: &[u8]) -> Result<Self, std::io::Error> {
-        let mut reader = Cursor::new(bytes);
-
-        let header = MidiPacketHeader::read(&mut reader)?;
-        trace!("Parsed header: {:#?}", header);
-
-        let command_section_header = MidiCommandListHeader::read(&mut reader)?;
-
-        let command_section_start = reader.position() as usize;
-        let command_section_end = command_section_start + command_section_header.length();
-        let mut command_section_cursor = Cursor::new(&bytes[command_section_start..command_section_end]);
-
-        let command_section = MidiCommandListBody::read(&mut command_section_cursor, command_section_header.flags().z_flag())?;
-        trace!("Parsed command section: {:#?}", command_section);
-
-        // let recovery_journal: Option<u8> = if command_section_header.flags().j_flag() {
-        //     let journal_bytes = &bytes[i..];
-        //     //Some(RecoveryJournal::from_be_bytes(journal_bytes)?)
-        //     None // Placeholder for recovery journal parsing
-        // } else {
-        //     None
-        // };
-
-        Ok(Self {
-            header,
-            command_list: command_section,
-            //recovery_journal,
-        })
     }
 
     pub(crate) fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> std::io::Result<usize> {
@@ -76,24 +44,13 @@ impl MidiPacket {
         let command_section_header_size = MidiCommandListHeader::size(needs_b_flag);
         size_of::<MidiPacketHeader>() + command_section_header_size + command_section_size
     }
-
-    pub fn commands(&self) -> &[TimedCommand] {
-        self.command_list.commands()
-    }
-
-    pub(crate) fn sequence_number(&self) -> u16 {
-        self.header.sequence_number()
-    }
-
-    pub fn timestamp(&self) -> u32 {
-        self.header.timestamp()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::packets::midi_packets::midi_command::MidiCommand;
+    use crate::packets::midi_packets::midi_packet_zero_alloc::MidiPacketZeroAlloc;
     use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 
     #[test]
@@ -108,17 +65,20 @@ mod tests {
             channel: 0,
         };
         let timed_command = TimedCommand::new(None, command);
+        let timed_comands = &[timed_command];
 
-        let packet = MidiPacket::new(sequence_number, timestamp, ssrc, &[timed_command]);
+        let packet = MidiPacketBuilder::new(sequence_number, timestamp, ssrc, timed_comands);
 
         let mut bytes = vec![0; packet.size(false)];
         packet.write(&mut Cursor::new(&mut bytes), false).unwrap();
 
-        let parsed_packet = MidiPacket::from_be_bytes(&bytes).unwrap();
+        let parsed_packet = MidiPacketZeroAlloc::new(bytes.as_slice()).expect("Failed to parse MIDI packet");
 
-        assert_eq!(packet.header.sequence_number(), parsed_packet.header.sequence_number());
-        assert_eq!(packet.header.timestamp(), parsed_packet.header.timestamp());
-        assert_eq!(packet.command_list.commands().len(), parsed_packet.command_list.commands().len());
-        assert_eq!(packet.command_list, parsed_packet.command_list);
+        assert_eq!(sequence_number, parsed_packet.sequence_number());
+        assert_eq!(timestamp, parsed_packet.timestamp());
+        let parsed_commands: Vec<_> = parsed_packet.commands().collect();
+        assert_eq!(timed_comands.len(), parsed_commands.len());
+        assert_eq!(timed_comands.first().unwrap().command(), &parsed_commands.first().unwrap().command().to_owned());
+        assert_eq!(timed_comands.first().unwrap().delta_time(), parsed_commands.first().unwrap().delta_time());
     }
 }

@@ -1,19 +1,32 @@
+use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
-use std::sync::Arc;
+use std::net::SocketAddr;
+use tracing::Level;
 
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    colog::default_builder().filter_level(log::LevelFilter::Info).init();
+    use tracing_subscriber::util::SubscriberInitExt;
 
-    let server = Arc::new(RtpMidiSession::new("My Session".to_string(), 54321));
-    server
-        .start(5004, RtpMidiSession::accept_all_invitations)
-        .await
-        .expect("Error while running the server");
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_target(false)
+        .finish()
+        .init();
 
-    let addr = std::net::SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
-    server.invite_participant(addr).await.unwrap();
+    let session = RtpMidiSession::start(
+        5004,
+        "My Session",
+        54321,
+        InviteResponder::new(|packet, _addr| packet.name() == Some("Bob's jam session")),
+    )
+    .await
+    .expect("Failed to start RTP MIDI session");
+
+    let addr = SocketAddr::new("172.31.112.1".parse().unwrap(), 5006);
+    session.invite_participant(addr).await;
 
     tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }
