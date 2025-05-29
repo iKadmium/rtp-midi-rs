@@ -3,13 +3,13 @@ use std::io::Write;
 use super::{delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TimedCommand {
+pub struct TimedCommand<'a> {
     delta_time: Option<u32>,
-    command: MidiCommand,
+    command: MidiCommand<'a>,
 }
 
-impl TimedCommand {
-    pub fn new(delta_time: Option<u32>, command: MidiCommand) -> Self {
+impl<'a> TimedCommand<'a> {
+    pub fn new(delta_time: Option<u32>, command: MidiCommand<'a>) -> Self {
         TimedCommand { delta_time, command }
     }
 

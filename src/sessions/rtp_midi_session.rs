@@ -162,11 +162,11 @@ impl RtpMidiSession {
         listeners.insert(event_type, Box::new(callback));
     }
 
-    pub async fn send_midi_batch(&self, commands: &[TimedCommand]) -> std::io::Result<()> {
+    pub async fn send_midi_batch(&self, commands: &[TimedCommand<'_>]) -> std::io::Result<()> {
         self.midi_port.send_midi_batch(self, commands).await
     }
 
-    pub async fn send_midi(&self, command: &MidiCommand) -> std::io::Result<()> {
+    pub async fn send_midi(&self, command: &MidiCommand<'_>) -> std::io::Result<()> {
         self.midi_port.send_midi(self, command).await
     }
 

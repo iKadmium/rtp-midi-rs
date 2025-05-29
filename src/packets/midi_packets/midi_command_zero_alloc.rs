@@ -69,7 +69,7 @@ impl<'a> MidiCommandZeroAlloc<'a> {
                 lsb: self.data[0],
                 msb: self.data[1],
             },
-            0xF0 => MidiCommand::SysEx { data: self.data.to_vec() }, // SysEx or other non-standard command
+            0xF0 => MidiCommand::SysEx { data: self.data }, // SysEx or other non-standard command
             _ => unreachable!(),
         }
     }

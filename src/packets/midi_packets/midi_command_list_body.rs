@@ -3,13 +3,13 @@ use std::io::Write;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
-pub struct MidiCommandListBody {
-    commands: Vec<TimedCommand>,
+pub struct MidiCommandListBody<'a> {
+    commands: &'a [TimedCommand<'a>],
 }
 
-impl MidiCommandListBody {
-    pub fn new(commands: &[TimedCommand]) -> Self {
-        MidiCommandListBody { commands: commands.to_vec() }
+impl<'a> MidiCommandListBody<'a> {
+    pub fn new(commands: &'a [TimedCommand]) -> Self {
+        MidiCommandListBody { commands }
     }
 
     pub fn size(&self, z_flag: bool) -> usize {
@@ -36,7 +36,7 @@ impl MidiCommandListBody {
     pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> Result<usize, std::io::Error> {
         let mut offset = 0;
         let mut running_status: Option<u8> = None;
-        for command in &self.commands {
+        for command in self.commands {
             let write_delta_time = if offset == 0 { z_flag } else { true };
             let bytes_written = command.write(writer, running_status, write_delta_time)?;
             running_status = Some(command.command().status());

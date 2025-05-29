@@ -9,14 +9,14 @@ use super::{
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct MidiPacketBuilder {
+pub struct MidiPacketBuilder<'a> {
     header: MidiPacketHeader,
-    command_list: MidiCommandListBody,
+    command_list: MidiCommandListBody<'a>,
     //recovery_journal: Option<RecoveryJournal>,
 }
 
-impl MidiPacketBuilder {
-    pub(crate) fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &[TimedCommand]) -> Self {
+impl<'a> MidiPacketBuilder<'a> {
+    pub(crate) fn new(sequence_number: u16, timestamp: u32, ssrc: u32, commands: &'a [TimedCommand]) -> Self {
         MidiPacketBuilder {
             header: MidiPacketHeader::new(sequence_number, timestamp, ssrc),
             command_list: MidiCommandListBody::new(commands),

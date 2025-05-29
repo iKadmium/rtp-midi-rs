@@ -1,10 +1,9 @@
 use byteorder::WriteBytesExt;
 use std::io::Write;
 
-#[derive(Debug, Clone, PartialEq)] // Removed `Copy` trait as `SysEx` uses `Vec<u8>`
-#[repr(u8)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
-pub enum MidiCommand {
+pub enum MidiCommand<'a> {
     NoteOff { channel: u8, key: u8, velocity: u8 },
     NoteOn { channel: u8, key: u8, velocity: u8 },
     PolyphonicKeyPressure { channel: u8, key: u8, pressure: u8 },
@@ -12,10 +11,10 @@ pub enum MidiCommand {
     ProgramChange { channel: u8, program: u8 },
     ChannelPressure { channel: u8, pressure: u8 },
     PitchBend { channel: u8, lsb: u8, msb: u8 },
-    SysEx { data: Vec<u8> }, // System Exclusive message
+    SysEx { data: &'a [u8] }, // System Exclusive message
 }
 
-impl MidiCommand {
+impl MidiCommand<'_> {
     pub(crate) fn size(&self) -> usize {
         match self {
             MidiCommand::SysEx { data } => data.len() + 2,
@@ -39,6 +38,50 @@ impl MidiCommand {
             MidiCommand::ProgramChange { channel, .. } => 0xC0 | (channel & 0x0F),
             MidiCommand::ChannelPressure { channel, .. } => 0xD0 | (channel & 0x0F),
             MidiCommand::PitchBend { channel, .. } => 0xE0 | (channel & 0x0F),
+        }
+    }
+
+    pub fn to_owned(&self) -> MidiCommand<'static> {
+        match self {
+            MidiCommand::SysEx { data } => {
+                let owned: Vec<u8> = data.to_vec();
+                MidiCommand::SysEx {
+                    data: Box::leak(owned.into_boxed_slice()),
+                }
+            }
+            MidiCommand::NoteOff { channel, key, velocity } => MidiCommand::NoteOff {
+                channel: *channel,
+                key: *key,
+                velocity: *velocity,
+            },
+            MidiCommand::NoteOn { channel, key, velocity } => MidiCommand::NoteOn {
+                channel: *channel,
+                key: *key,
+                velocity: *velocity,
+            },
+            MidiCommand::PolyphonicKeyPressure { channel, key, pressure } => MidiCommand::PolyphonicKeyPressure {
+                channel: *channel,
+                key: *key,
+                pressure: *pressure,
+            },
+            MidiCommand::ControlChange { channel, controller, value } => MidiCommand::ControlChange {
+                channel: *channel,
+                controller: *controller,
+                value: *value,
+            },
+            MidiCommand::ProgramChange { channel, program } => MidiCommand::ProgramChange {
+                channel: *channel,
+                program: *program,
+            },
+            MidiCommand::ChannelPressure { channel, pressure } => MidiCommand::ChannelPressure {
+                channel: *channel,
+                pressure: *pressure,
+            },
+            MidiCommand::PitchBend { channel, lsb, msb } => MidiCommand::PitchBend {
+                channel: *channel,
+                lsb: *lsb,
+                msb: *msb,
+            },
         }
     }
 

@@ -207,7 +207,7 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(name = %ctx.name(), participants))]
-    pub async fn send_midi_batch(&self, ctx: &RtpMidiSession, commands: &[TimedCommand]) -> std::io::Result<()> {
+    pub async fn send_midi_batch<'a>(&self, ctx: &RtpMidiSession, commands: &[TimedCommand<'a>]) -> std::io::Result<()> {
         let lock = ctx.participants.lock().await;
         let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
@@ -221,7 +221,7 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(name = %ctx.name()))]
-    pub async fn send_midi(&self, ctx: &RtpMidiSession, command: &MidiCommand) -> std::io::Result<()> {
+    pub async fn send_midi<'a>(&self, ctx: &RtpMidiSession, command: &'a MidiCommand<'a>) -> std::io::Result<()> {
         let batch: [TimedCommand; 1] = [TimedCommand::new(None, command.clone())];
         self.send_midi_batch(ctx, &batch).await
     }
