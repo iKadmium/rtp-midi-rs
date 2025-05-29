@@ -5,7 +5,7 @@ use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
 use crate::packets::midi_packets::midi_command::MidiCommand;
-use crate::packets::midi_packets::midi_packet::MidiPacket;
+use crate::packets::midi_packets::midi_packet_builder::MidiPacketBuilder;
 use crate::packets::midi_packets::midi_timed_command::TimedCommand;
 use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
@@ -110,7 +110,9 @@ impl MidiPort {
                 let mut seq = self.sequence_number.lock().await;
                 *seq = midi_packet.sequence_number().wrapping_add(1);
                 if let Some(callback) = listeners.lock().await.get(&RtpMidiEventType::MidiPacket) {
-                    callback(midi_packet);
+                    for command in midi_packet.commands() {
+                        callback(&command.command());
+                    }
                 }
             }
         }
@@ -209,12 +211,11 @@ impl MidiPort {
         let lock = ctx.participants.lock().await;
         let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
-        let packet = MidiPacket::new(*seq, current_timestamp(self.start_time) as u32, self.ssrc, commands);
+        let packet = MidiPacketBuilder::new(*seq, current_timestamp(self.start_time) as u32, self.ssrc, commands);
         *seq = seq.wrapping_add(1);
-        let packet_bytes = packet.to_bytes(false);
         event!(Level::DEBUG, "Sending MIDI packet batch");
         for participant in participants {
-            self.socket.send_to(&packet_bytes, participant.midi_port_addr()).await?;
+            self.socket.send_to(&packet.to_bytes(false), participant.midi_port_addr()).await?;
         }
         Ok(())
     }

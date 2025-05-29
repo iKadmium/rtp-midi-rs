@@ -34,10 +34,6 @@ impl MidiPacketHeaderFlags {
         flags
     }
 
-    pub fn from_u16(flags: u16) -> Self {
-        MidiPacketHeaderFlags { flags }
-    }
-
     fn get_flag(&self, flag: FlagMasks) -> bool {
         self.flags & flag as u16 != 0
     }
@@ -75,6 +71,18 @@ impl MidiPacketHeaderFlags {
     }
 }
 
+impl From<u16> for MidiPacketHeaderFlags {
+    fn from(flags: u16) -> Self {
+        MidiPacketHeaderFlags { flags }
+    }
+}
+
+impl Into<u16> for MidiPacketHeaderFlags {
+    fn into(self) -> u16 {
+        self.flags
+    }
+}
+
 impl MidiPacketHeader {
     pub fn new(sequence_number: u16, timestamp: u32, ssrc: u32) -> Self {
         //let flags: u8 = 0b10
@@ -97,7 +105,7 @@ impl MidiPacketHeader {
     }
 
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let flags = MidiPacketHeaderFlags::from_u16(reader.read_u16::<BigEndian>()?);
+        let flags = MidiPacketHeaderFlags::from(reader.read_u16::<BigEndian>()?);
         let sequence_number = reader.read_u16::<BigEndian>()?;
         let timestamp = reader.read_u32::<BigEndian>()?;
         let ssrc = reader.read_u32::<BigEndian>()?;

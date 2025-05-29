@@ -22,9 +22,7 @@ async fn main() {
 
     server
         .add_listener(RtpMidiEventType::MidiPacket, move |data| {
-            for command in data.commands() {
-                event!(Level::INFO, "Received command: {:?}", command);
-            }
+            event!(Level::INFO, "Received command: {:?}", data);
         })
         .await;
 

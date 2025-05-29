@@ -1,6 +1,10 @@
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::io::{Read, Write};
+
+use super::util::StatusBit;
 
 #[derive(Debug, Clone, PartialEq)] // Removed `Copy` trait as `SysEx` uses `Vec<u8>`
 #[repr(u8)]
@@ -13,13 +17,13 @@ pub enum MidiCommand {
     ProgramChange { channel: u8, program: u8 },
     ChannelPressure { channel: u8, pressure: u8 },
     PitchBend { channel: u8, lsb: u8, msb: u8 },
-    SysEx(Vec<u8>), // System Exclusive message
+    SysEx { data: Vec<u8> }, // System Exclusive message
 }
 
 impl MidiCommand {
     pub(crate) fn size(&self) -> usize {
         match self {
-            MidiCommand::SysEx(data) => data.len() + 2,
+            MidiCommand::SysEx { data } => data.len() + 2,
             MidiCommand::NoteOff { .. } => 2,
             MidiCommand::NoteOn { .. } => 2,
             MidiCommand::PolyphonicKeyPressure { .. } => 2,
@@ -32,7 +36,7 @@ impl MidiCommand {
 
     pub(crate) fn status(&self) -> u8 {
         match self {
-            MidiCommand::SysEx(_) => 0xF0,
+            MidiCommand::SysEx { .. } => 0xF0,
             MidiCommand::NoteOff { channel, .. } => 0x80 | (channel & 0x0F),
             MidiCommand::NoteOn { channel, .. } => 0x90 | (channel & 0x0F),
             MidiCommand::PolyphonicKeyPressure { channel, .. } => 0xA0 | (channel & 0x0F),
@@ -56,6 +60,74 @@ impl MidiCommand {
         }
     }
 
+    pub(super) fn from_be_bytes(data: &[u8], running_status: Option<u8>) -> Result<(Self, usize), Error> {
+        let first_byte = data[0];
+        if first_byte == 0xF0 {
+            let end = data
+                .iter()
+                .position(|&b| b == 0xF7)
+                .ok_or_else(|| Error::new(ErrorKind::InvalidData, "SysEx message not terminated with 0xF7"))?;
+            let sysex_data = &data[1..end];
+            return Ok((MidiCommand::SysEx { data: sysex_data.to_vec() }, end + 1));
+        }
+
+        let (status, data_bytes_read) = if first_byte.status_bit() {
+            (first_byte, 1)
+        } else {
+            match running_status {
+                Some(rs) => (rs, 0),
+                None => {
+                    return Err(Error::new(ErrorKind::InvalidData, "No status with no running status byte"));
+                }
+            }
+        };
+        let channel = status & 0x0F;
+        let size = MidiCommand::size_from_status(status);
+
+        let command = match status & 0xF0 {
+            0x80 => MidiCommand::NoteOff {
+                channel,
+                key: data[data_bytes_read],
+                velocity: data[data_bytes_read + 1],
+            },
+            0x90 => MidiCommand::NoteOn {
+                channel,
+                key: data[data_bytes_read],
+                velocity: data[data_bytes_read + 1],
+            },
+            0xA0 => MidiCommand::PolyphonicKeyPressure {
+                channel,
+                key: data[data_bytes_read],
+                pressure: data[data_bytes_read + 1],
+            },
+            0xB0 => MidiCommand::ControlChange {
+                channel,
+                controller: data[data_bytes_read],
+                value: data[data_bytes_read + 1],
+            },
+            0xC0 => MidiCommand::ProgramChange {
+                channel,
+                program: data[data_bytes_read],
+            },
+            0xD0 => MidiCommand::ChannelPressure {
+                channel,
+                pressure: data[data_bytes_read],
+            },
+            0xE0 => MidiCommand::PitchBend {
+                channel,
+                lsb: data[data_bytes_read],
+                msb: data[data_bytes_read + 1],
+            },
+            _ => {
+                return Err(Error::new(ErrorKind::InvalidData, "Invalid MIDI command"));
+            }
+        };
+
+        let bytes_read = data_bytes_read + size;
+
+        Ok((command, bytes_read))
+    }
+
     pub(super) fn read<R: Read>(reader: &mut R, running_status: Option<u8>) -> Result<Self, std::io::Error> {
         let first_byte = reader.read_u8()?;
         if first_byte == 0xF0 {
@@ -67,7 +139,7 @@ impl MidiCommand {
                 }
                 data.push(byte);
             }
-            return Ok(MidiCommand::SysEx(data));
+            return Ok(MidiCommand::SysEx { data });
         }
         let mut data: [u8; 2] = [0; 2];
 
@@ -135,7 +207,7 @@ impl MidiCommand {
         }
 
         match self {
-            MidiCommand::SysEx(data) => {
+            MidiCommand::SysEx { data } => {
                 writer.write_u8(0xF0)?;
                 bytes_written += 1;
                 writer.write_all(data)?;

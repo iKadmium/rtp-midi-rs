@@ -1,4 +1,4 @@
-use rtpmidi::packets::midi_packets::{midi_command::MidiCommand, midi_timed_command::TimedCommand};
+use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use tracing::{Level, event};
@@ -19,30 +19,19 @@ async fn main() {
 
     // Add a listener for incoming MIDI packets
     session
-        .add_listener(RtpMidiEventType::MidiPacket, move |data| {
+        .add_listener(RtpMidiEventType::MidiPacket, move |command| {
             // Filter for NoteOn commands
-            let commands: Vec<TimedCommand> = data
-                .commands()
-                .iter()
-                .filter_map(|c| match c.command() {
-                    // Return a NoteOn command down 1 octave
-                    MidiCommand::NoteOn { channel, key, velocity } => Some(TimedCommand::new(
-                        None,
-                        MidiCommand::NoteOn {
-                            channel: *channel,
-                            key: key.saturating_sub(12),
-                            velocity: *velocity,
-                        },
-                    )),
-                    _ => None,
-                })
-                .collect();
+            if let MidiCommand::NoteOn { channel, key, velocity } = command {
+                let response = MidiCommand::NoteOn {
+                    channel: *channel,
+                    key: *key - 12, // Down 1 octave
+                    velocity: *velocity,
+                };
 
-            if !commands.is_empty() {
                 let session_clone = session_clone.clone();
                 tokio::spawn(async move {
-                    match session_clone.send_midi_batch(&commands).await {
-                        Ok(_) => event!(Level::INFO, "MIDI packet sent successfully, {:?}", commands),
+                    match session_clone.send_midi(&response).await {
+                        Ok(_) => event!(Level::INFO, "MIDI packet sent successfully, {:?}", response),
                         Err(e) => event!(Level::INFO, "Error sending MIDI packet: {:?}", e),
                     };
                 });

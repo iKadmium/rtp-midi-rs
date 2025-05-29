@@ -33,13 +33,11 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_1 = received_by_1.clone();
         session1
-            .add_listener(RtpMidiEventType::MidiPacket, move |packet| {
+            .add_listener(RtpMidiEventType::MidiPacket, move |command| {
                 let received_by_1 = received_by_1.clone();
+                let command_clone = command.clone();
                 tokio::spawn(async move {
-                    let commands = packet.commands();
-                    if let Some(cmd) = commands.first() {
-                        *received_by_1.lock().await = Some(cmd.command().clone());
-                    }
+                    *received_by_1.lock().await = Some(command_clone);
                 });
             })
             .await;
@@ -48,13 +46,11 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_2 = received_by_2.clone();
         session2
-            .add_listener(RtpMidiEventType::MidiPacket, move |packet| {
+            .add_listener(RtpMidiEventType::MidiPacket, move |command| {
                 let received_by_2 = received_by_2.clone();
+                let command_clone = command.clone();
                 tokio::spawn(async move {
-                    let commands = packet.commands();
-                    if let Some(cmd) = commands.first() {
-                        *received_by_2.lock().await = Some(cmd.command().clone());
-                    }
+                    *received_by_2.lock().await = Some(command_clone);
                 });
             })
             .await;

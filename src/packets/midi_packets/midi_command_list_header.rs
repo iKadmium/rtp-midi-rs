@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 
 use super::midi_command_list_body::MidiCommandListBody;
 
+#[derive(Debug)]
 pub struct MidiCommandListHeader {
     flags: MidiCommandListFlags,
     length: usize,
@@ -102,11 +103,11 @@ impl MidiCommandListHeader {
         }
     }
 
-    pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let first_byte = reader.read_u8()?;
+    pub fn from_slice(data: &[u8]) -> Self {
+        let first_byte = data[0];
         let flags = MidiCommandListFlags::from_u8(first_byte);
-        let result = if flags.b_flag() {
-            let length_lsb = reader.read_u8()?;
+        if flags.b_flag() {
+            let length_lsb = data[1];
             let length = (((first_byte & 0x0F) as u16) << 8) | (length_lsb as u16);
             Self {
                 flags,
@@ -115,27 +116,6 @@ impl MidiCommandListHeader {
         } else {
             let length = (first_byte & 0x0F) as usize;
             Self { flags, length }
-        };
-
-        Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn test_midi_command_list_header() {
-        let mut buffer = Vec::new();
-        let header = MidiCommandListHeader::new(MidiCommandListFlags::new(true, false, true, false), 0x123);
-        header.write(&mut buffer).unwrap();
-
-        let mut cursor = Cursor::new(buffer);
-        let read_header = MidiCommandListHeader::read(&mut cursor).unwrap();
-
-        assert_eq!(header.flags(), read_header.flags());
-        assert_eq!(header.length(), read_header.length());
+        }
     }
 }

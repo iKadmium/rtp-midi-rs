@@ -15,11 +15,11 @@ use super::mdns::advertise_mdns;
 use super::rtp_port::RtpPort;
 use crate::packets::midi_packets::midi_command::MidiCommand;
 use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+use crate::participant::Participant;
 use crate::sessions::control_port::ControlPort;
 use crate::sessions::midi_port::MidiPort;
-use crate::{packets::midi_packets::midi_packet::MidiPacket, participant::Participant};
 
-pub(super) type MidiPacketListener = dyn Fn(MidiPacket) + Send + 'static;
+pub(super) type MidiPacketListener = dyn Fn(&MidiCommand) + Send + 'static;
 pub(super) type ListenerSet = HashMap<RtpMidiEventType, Box<MidiPacketListener>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -156,7 +156,7 @@ impl RtpMidiSession {
 
     pub async fn add_listener<F>(&self, event_type: RtpMidiEventType, callback: F)
     where
-        F: Fn(MidiPacket) + Send + 'static,
+        F: Fn(&MidiCommand) + Send + 'static,
     {
         let mut listeners = self.listeners.lock().await;
         listeners.insert(event_type, Box::new(callback));
