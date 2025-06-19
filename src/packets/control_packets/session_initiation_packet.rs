@@ -1,75 +1,80 @@
 use super::util::ReadOptionalStringExt;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write};
+use std::{ffi::{CStr, CString}, io::{Read, Write}};
 
 use super::control_packet::ControlPacket;
 
 #[derive(Debug)]
 pub enum SessionInitiationPacket {
-    Invitation(SessionInitiationPacketBody),
-    Acknowledgment(SessionInitiationPacketBody),
-    Rejection(SessionInitiationPacketBody),
-    Termination(SessionInitiationPacketBody),
+    Invitation(SessionInitiationPacketBodyWithName),
+    Acknowledgment(SessionInitiationPacketBodyWithName),
+    Rejection(SessionInitiationPacketBodyWithoutName),
+    Termination(SessionInitiationPacketBodyWithoutName),
 }
 
 #[derive(Debug)]
-pub struct SessionInitiationPacketBody {
+pub struct SessionInitiationPacketBodyWithName {
     pub protocol_version: u32,
     pub initiator_token: u32,
     pub sender_ssrc: u32,
-    pub name: Option<String>,
+    pub name: CString,
+}
+
+#[derive(Debug)]
+pub struct SessionInitiationPacketBodyWithoutName {
+    pub protocol_version: u32,
+    pub initiator_token: u32,
+    pub sender_ssrc: u32,
 }
 
 impl SessionInitiationPacket {
-    pub fn new_acknowledgment(initiator_token: u32, sender_ssrc: u32, name: String) -> Self {
-        SessionInitiationPacket::Acknowledgment(SessionInitiationPacketBody {
+    pub fn new_acknowledgment(initiator_token: u32, sender_ssrc: u32, name: CString) -> Self {
+        SessionInitiationPacket::Acknowledgment(SessionInitiationPacketBodyWithName {
             protocol_version: 2,
             initiator_token,
             sender_ssrc,
-            name: Some(name),
+            name,
         })
     }
 
-    pub fn new_invitation(initiator_token: u32, sender_ssrc: u32, name: String) -> Self {
-        SessionInitiationPacket::Invitation(SessionInitiationPacketBody {
+    pub fn new_invitation(initiator_token: u32, sender_ssrc: u32, name: CString) -> Self {
+        SessionInitiationPacket::Invitation(SessionInitiationPacketBodyWithName {
             protocol_version: 2,
             initiator_token,
             sender_ssrc,
-            name: Some(name),
+            name,
         })
     }
 
-    pub fn new_rejection(initiator_token: u32, sender_ssrc: u32, name: String) -> Self {
-        SessionInitiationPacket::Rejection(SessionInitiationPacketBody {
+    pub fn new_rejection(initiator_token: u32, sender_ssrc: u32) -> Self {
+        SessionInitiationPacket::Rejection(SessionInitiationPacketBodyWithoutName {
             protocol_version: 2,
             initiator_token,
-            sender_ssrc,
-            name: Some(name),
+            sender_ssrc
         })
     }
 
     pub fn new_termination(initiator_token: u32, sender_ssrc: u32) -> Self {
-        SessionInitiationPacket::Termination(SessionInitiationPacketBody {
+        SessionInitiationPacket::Termination(SessionInitiationPacketBodyWithoutName {
             protocol_version: 2,
             initiator_token,
             sender_ssrc,
-            name: None,
         })
     }
 
     pub fn read<R: Read>(reader: &mut R, command: &[u8]) -> std::io::Result<Self> {
-        let body = SessionInitiationPacketBody::read(reader)?;
+        let body = SessionInitiationPacketBodyWithName::read(reader)?;
 
         match command {
-            b"IN" => Ok(SessionInitiationPacket::Invitation(body)),
-            b"OK" => Ok(SessionInitiationPacket::Acknowledgment(body)),
-            b"NO" => Ok(SessionInitiationPacket::Rejection(body)),
-            b"BY" => Ok(SessionInitiationPacket::Termination(body)),
+            b"IN" => Ok(SessionInitiationPacket::Invitation(SessionInitiationPacketBodyWithName::read(reader)?)),
+            b"OK" => Ok(SessionInitiationPacket::Acknowledgment(SessionInitiationPacketBodyWithName::read(reader)?)),
+            b"NO" => Ok(SessionInitiationPacket::Rejection(SessionInitiationPacketBodyWithoutName::read(reader)?)),
+            b"BY" => Ok(SessionInitiationPacket::Termination(SessionInitiationPacketBodyWithoutName::read(reader)?)),
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Unknown session initiation command")),
         }
     }
 
-    fn body(&self) -> &SessionInitiationPacketBody {
+    fn body(&self) -> &SessionInitiationPacketBodyWithName {
         match self {
             SessionInitiationPacket::Invitation(body)
             | SessionInitiationPacket::Acknowledgment(body)
@@ -113,7 +118,7 @@ impl SessionInitiationPacket {
         self.body().sender_ssrc
     }
 
-    pub fn name(&self) -> Option<&str> {
+    pub fn name(&self) -> Option<&CStr> {
         self.body().name.as_deref()
     }
 
@@ -122,7 +127,7 @@ impl SessionInitiationPacket {
     }
 }
 
-impl SessionInitiationPacketBody {
+impl SessionInitiationPacketBodyWithName {
     pub const MIN_SIZE: usize = size_of::<u32>() * 3;
 
     pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
@@ -131,7 +136,7 @@ impl SessionInitiationPacketBody {
         let sender_ssrc = reader.read_u32::<BigEndian>()?;
         let name = reader.read_optional_string()?;
 
-        Ok(SessionInitiationPacketBody {
+        Ok(SessionInitiationPacketBodyWithName {
             protocol_version,
             initiator_token,
             sender_ssrc,
@@ -155,15 +160,15 @@ impl SessionInitiationPacketBody {
     }
 
     pub fn size(&self) -> usize {
-        SessionInitiationPacketBody::MIN_SIZE + self.name.as_ref().map_or(0, |name| name.len() + 1)
+        SessionInitiationPacketBodyWithName::MIN_SIZE + self.name.as_ref().map_or(0, |name| name.count_bytes())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::{ffi::CString, io::Cursor, str::FromStr};
 
-    use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
+    use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBodyWithName};
 
     fn get_test_body() -> [u8; 12] {
         [
@@ -218,13 +223,13 @@ mod tests {
         ];
 
         let mut cursor = Cursor::new(buffer);
-        let result = SessionInitiationPacketBody::read(&mut cursor);
+        let result = SessionInitiationPacketBodyWithName::read(&mut cursor);
         match result {
             Ok(body) => {
                 assert_eq!(body.protocol_version, 2);
                 assert_eq!(body.initiator_token, 0xF8D180E6);
                 assert_eq!(body.sender_ssrc, 0xF519AEB9);
-                assert_eq!(body.name, Some("Lovely Session".to_string()));
+                assert_eq!(body.name, Some(CString::from_str("Lovely Session").unwrap()));
             }
             Err(e) => panic!("Failed to read body: {}", e),
         }
@@ -241,7 +246,7 @@ mod tests {
     fn test_new_acknowledgment() {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
-        let name = "Lovely Session".to_string();
+        let name = CString::new("Lovely Session").unwrap();
         let packet = SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
         if let SessionInitiationPacket::Acknowledgment(body) = packet {
             assert_eq!(body.protocol_version, 2);
@@ -257,7 +262,7 @@ mod tests {
     fn test_new_invitation() {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
-        let name = "Lovely Session".to_string();
+        let name = CString::new("Lovely Session").unwrap();
         let packet = SessionInitiationPacket::new_invitation(initiator_token, sender_ssrc, name.clone());
         if let SessionInitiationPacket::Invitation(body) = packet {
             assert_eq!(body.protocol_version, 2);
@@ -273,7 +278,7 @@ mod tests {
     fn test_write() {
         let initiator_token = 0xF8D180E6;
         let sender_ssrc = 0xF519AEB9;
-        let name = "Lovely Session".to_string();
+        let name = CString::new("Lovely Session").unwrap();
         let packet = SessionInitiationPacket::new_acknowledgment(initiator_token, sender_ssrc, name.clone());
         let mut buffer = Vec::new();
         let result = packet.write(&mut buffer);

@@ -1,20 +1,20 @@
 use byteorder::ReadBytesExt;
-use std::io::Read;
+use std::{ffi::CString, io::Read};
 
 // Extension trait to read an optional, null-terminated string
 pub(crate) trait ReadOptionalStringExt: Read {
-    fn read_optional_string(&mut self) -> std::io::Result<Option<String>>;
+    fn read_optional_string(&mut self) -> std::io::Result<Option<CString>>;
 }
 
 impl<R: Read> ReadOptionalStringExt for R {
-    fn read_optional_string(&mut self) -> std::io::Result<Option<String>> {
+    fn read_optional_string(&mut self) -> std::io::Result<Option<CString>> {
         let mut name_bytes = Vec::<u8>::new();
         loop {
             match self.read_u8() {
                 Ok(0) => {
                     // Null terminator found
                     return Ok(Some(
-                        String::from_utf8(name_bytes).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Name contains invalid UTF-8"))?,
+                        CString::from_vec_with_nul(name_bytes).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Name contains invalid UTF-8"))?,
                     ));
                 }
                 Ok(byte) => {

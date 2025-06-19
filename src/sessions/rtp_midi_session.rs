@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -46,7 +47,7 @@ pub struct RtpMidiSession {
 pub(super) struct PendingInvitation {
     pub addr: SocketAddr,
     pub token: u32,
-    pub name: String,
+    pub name: CString,
 }
 
 impl RtpMidiSession {

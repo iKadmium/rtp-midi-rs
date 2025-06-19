@@ -5,6 +5,8 @@ use super::{
     session_initiation_packet::SessionInitiationPacket, // Ensure ReadOptionalStringExt is in scope if SessionInitiationPacket::read relies on it being used on the reader directly.
 };
 
+const CONTROL_PACKET_HEADER: [u8; 2] = [255, 255];
+
 #[derive(Debug)]
 pub enum ControlPacket {
     ClockSync(ClockSyncPacket),
@@ -15,16 +17,8 @@ impl ControlPacket {
     pub(crate) const HEADER_SIZE: usize = 4;
 
     pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
-        if buffer.len() < 4 {
-            return Err(Error::new(ErrorKind::InvalidData, "Buffer too short to be a valid control packet"));
-        }
-
-        let command = if buffer[0] == 255 && buffer[1] == 255 {
-            &buffer[2..4]
-        } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid control packet header"));
-        };
         let mut reader = Cursor::new(&buffer[4..]);
+        let command = &buffer[2..4];
         match command {
             b"CK" => {
                 let clock_sync_packet = ClockSyncPacket::read(&mut reader)?;
@@ -48,7 +42,7 @@ impl ControlPacket {
     }
 
     pub fn is_control_packet(buffer: &[u8]) -> bool {
-        buffer.len() >= 4 && buffer[0] == 255 && buffer[1] == 255
+        buffer.starts_with(&CONTROL_PACKET_HEADER)
     }
 }
 

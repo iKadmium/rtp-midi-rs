@@ -4,7 +4,7 @@ use super::rtp_midi_session::RtpMidiSession;
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacket;
-use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
+use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBodyWithName;
 use crate::sessions::rtp_midi_session::PendingInvitation;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -117,13 +117,13 @@ impl ControlPort {
                 PendingInvitation {
                     addr: src,
                     token: invitation.initiator_token(),
-                    name: invitation.name().unwrap_or("No name").to_string(),
+                    name: invitation.name(),
                 },
             );
             self.send_invitation_acceptance(invitation, src).await;
         } else {
             event!(Level::INFO, "Rejected session initiation");
-            let rejection_packet = SessionInitiationPacket::new_rejection(invitation.initiator_token(), self.ssrc, self.session_name.clone());
+            let rejection_packet = SessionInitiationPacket::new_rejection(invitation.initiator_token(), self.ssrc);
             let result = self.socket.send_to(&rejection_packet.to_bytes(), src).await;
             if let Err(e) = result {
                 event!(Level::ERROR, "Failed to send session rejection: {}", e);
@@ -134,13 +134,13 @@ impl ControlPort {
     }
 
     #[instrument(skip_all, fields(token = rejection.initiator_token))]
-    async fn handle_rejection(&self, rejection: &SessionInitiationPacketBody, ctx: &RtpMidiSession, src: SocketAddr) {
+    async fn handle_rejection(&self, rejection: &SessionInitiationPacketBodyWithName, ctx: &RtpMidiSession, src: SocketAddr) {
         event!(Level::INFO, "Received session rejection");
         let _ = self.remove_invitation(rejection, ctx, src).await;
     }
 
     #[instrument(skip_all)]
-    async fn remove_invitation(&self, invitation_response: &SessionInitiationPacketBody, ctx: &RtpMidiSession, src: SocketAddr) -> Option<PendingInvitation> {
+    async fn remove_invitation(&self, invitation_response: &SessionInitiationPacketBodyWithName, ctx: &RtpMidiSession, src: SocketAddr) -> Option<PendingInvitation> {
         event!(Level::DEBUG, "Removing invitation for SSRC {} at {}", invitation_response.sender_ssrc, src);
         let mut locked_pending_invitations = ctx.pending_invitations.lock().await;
         if locked_pending_invitations.contains_key(&invitation_response.sender_ssrc) {
@@ -157,7 +157,7 @@ impl ControlPort {
     }
 
     #[instrument(skip_all, fields(ssrc = ack_body.sender_ssrc, src = %src))]
-    async fn handle_acknowledgment(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession, src: SocketAddr) {
+    async fn handle_acknowledgment(&self, ack_body: &SessionInitiationPacketBodyWithName, ctx: &RtpMidiSession, src: SocketAddr) {
         event!(Level::INFO, "Received session acknowledgment");
         let inv = self.remove_invitation(ack_body, ctx, src).await;
         if inv.is_none() {

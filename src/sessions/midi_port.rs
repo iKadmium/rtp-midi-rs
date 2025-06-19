@@ -3,7 +3,7 @@ use super::rtp_midi_session::{ListenerSet, RtpMidiSession, current_timestamp};
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packets::control_packets::control_packet::ControlPacket;
-use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBody};
+use crate::packets::control_packets::session_initiation_packet::{SessionInitiationPacket, SessionInitiationPacketBodyWithName};
 use crate::packets::midi_packets::midi_command::MidiCommand;
 use crate::packets::midi_packets::midi_packet_builder::MidiPacketBuilder;
 use crate::packets::midi_packets::midi_timed_command::TimedCommand;
@@ -119,7 +119,7 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(token = %ack_body.initiator_token))]
-    async fn handle_acknowledgment(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession) {
+    async fn handle_acknowledgment(&self, ack_body: &SessionInitiationPacketBodyWithName, ctx: &RtpMidiSession) {
         event!(Level::INFO, "Received session acknowledgment");
         let mut locked_pending_invitations = ctx.pending_invitations.lock().await;
 
