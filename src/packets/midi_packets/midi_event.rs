@@ -5,14 +5,14 @@ use crate::packets::midi_packets::delta_time::read_delta_time;
 use super::{delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TimedCommand<'a> {
+pub struct MidiEvent<'a> {
     delta_time: Option<u32>,
     command: MidiCommand<'a>,
 }
 
-impl<'a> TimedCommand<'a> {
+impl<'a> MidiEvent<'a> {
     pub fn new(delta_time: Option<u32>, command: MidiCommand<'a>) -> Self {
-        TimedCommand { delta_time, command }
+        MidiEvent { delta_time, command }
     }
 
     pub fn delta_time(&self) -> u32 {
@@ -23,11 +23,11 @@ impl<'a> TimedCommand<'a> {
         &self.command
     }
 
-    pub fn from_be_bytes(bytes: &'a [u8], should_read_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
+    pub fn from_be_bytes(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
         let mut delta_time = None;
 
         let mut bytes = bytes;
-        if should_read_delta_time {
+        if include_delta_time {
             let (dt, new_bytes) = read_delta_time(bytes)?;
             delta_time = Some(dt);
             bytes = new_bytes;
@@ -35,11 +35,11 @@ impl<'a> TimedCommand<'a> {
 
         let (command, offset) = MidiCommand::from_be_bytes(bytes, running_status)?;
 
-        Ok((TimedCommand { delta_time, command }, offset))
+        Ok((MidiEvent { delta_time, command }, offset))
     }
 
-    pub(super) fn write(&self, bytes: &mut BytesMut, running_status: Option<u8>, write_delta_time: bool) {
-        if write_delta_time {
+    pub(super) fn write(&self, bytes: &mut BytesMut, running_status: Option<u8>, include_delta_time: bool) {
+        if include_delta_time {
             match self.delta_time {
                 Some(dt) => bytes.write_delta_time(dt),
                 None => bytes.write_delta_time(0),
@@ -62,7 +62,7 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        let timed_command = TimedCommand {
+        let timed_command = MidiEvent {
             delta_time: Some(delta_time),
             command: command.clone(),
         };
@@ -84,7 +84,7 @@ mod tests {
         };
         command.write(&mut expected_bytes, None);
 
-        let timed_command = TimedCommand {
+        let timed_command = MidiEvent {
             delta_time: Some(delta_time),
             command: command.clone(),
         };
@@ -106,7 +106,7 @@ mod tests {
         };
         command.write(&mut expected_bytes, None);
 
-        let timed_command = TimedCommand {
+        let timed_command = MidiEvent {
             delta_time: None,
             command: command.clone(),
         };
@@ -131,7 +131,7 @@ mod tests {
         };
         command.write(&mut expected_bytes, None);
 
-        let timed_command = TimedCommand {
+        let timed_command = MidiEvent {
             delta_time: None,
             command: command.clone(),
         };

@@ -1,8 +1,8 @@
-use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet_zero_alloc::MidiPacketZeroAlloc};
+use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet_zero_alloc::MidiPacket};
 
 #[derive(Debug)]
 pub(crate) enum RtpMidiPacket<'a> {
-    Midi(MidiPacketZeroAlloc<'a>),
+    Midi(MidiPacket<'a>),
     Control(ControlPacket<'a>),
 }
 
@@ -11,7 +11,7 @@ impl<'a> RtpMidiPacket<'a> {
         if ControlPacket::is_control_packet(bytes) {
             ControlPacket::from_be_bytes(bytes).map(RtpMidiPacket::Control)
         } else {
-            MidiPacketZeroAlloc::new(bytes).map(RtpMidiPacket::Midi)
+            MidiPacket::new(bytes).map(RtpMidiPacket::Midi)
         }
     }
 }
@@ -23,12 +23,11 @@ mod tests {
 
     use super::*;
     use crate::packets::midi_packets::midi_command::MidiCommand;
-    use crate::packets::midi_packets::midi_packet_builder::MidiPacketBuilder;
-    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+    use crate::packets::midi_packets::midi_event::MidiEvent;
 
     #[test]
     fn test_parse_midi_packet() {
-        let commands = vec![TimedCommand::new(
+        let commands = vec![MidiEvent::new(
             None,
             MidiCommand::NoteOn {
                 channel: 1,
@@ -36,7 +35,7 @@ mod tests {
                 velocity: 127,
             },
         )];
-        let packet = MidiPacketBuilder::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands);
+        let packet = MidiPacket::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands);
 
         let parsed_packet = RtpMidiPacket::parse(&packet).unwrap();
         if let RtpMidiPacket::Midi(parsed_midi_packet) = parsed_packet {

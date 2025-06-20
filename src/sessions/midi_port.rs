@@ -5,8 +5,8 @@ use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
 use crate::packets::midi_packets::midi_command::MidiCommand;
-use crate::packets::midi_packets::midi_packet_builder::MidiPacketBuilder;
-use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+use crate::packets::midi_packets::midi_event::MidiEvent;
+use crate::packets::midi_packets::midi_packet_zero_alloc::MidiPacket;
 use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
 use crate::sessions::rtp_midi_session::{RtpMidiEventType, current_timestamp_u32};
@@ -197,11 +197,11 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(name = %ctx.name(), participants))]
-    pub async fn send_midi_batch<'a>(&self, ctx: &RtpMidiSession, commands: &[TimedCommand<'a>]) -> std::io::Result<()> {
+    pub async fn send_midi_batch<'a>(&self, ctx: &RtpMidiSession, commands: &[MidiEvent<'a>]) -> std::io::Result<()> {
         let lock = ctx.participants.lock().await;
         let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
-        let packet = MidiPacketBuilder::new_as_bytes(U16::new(*seq), current_timestamp_u32(self.start_time), self.ssrc, commands);
+        let packet = MidiPacket::new_as_bytes(U16::new(*seq), current_timestamp_u32(self.start_time), self.ssrc, commands);
         *seq = seq.wrapping_add(1);
         event!(Level::DEBUG, "Sending MIDI packet batch");
         for participant in participants {
@@ -212,7 +212,7 @@ impl MidiPort {
 
     #[instrument(skip_all, fields(name = %ctx.name()))]
     pub async fn send_midi<'a>(&self, ctx: &RtpMidiSession, command: &'a MidiCommand<'a>) -> std::io::Result<()> {
-        let batch: [TimedCommand; 1] = [TimedCommand::new(None, command.clone())];
+        let batch: [MidiEvent; 1] = [MidiEvent::new(None, command.clone())];
         self.send_midi_batch(ctx, &batch).await
     }
 

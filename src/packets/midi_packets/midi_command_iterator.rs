@@ -1,4 +1,4 @@
-use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+use crate::packets::midi_packets::midi_event::MidiEvent;
 
 use super::midi_command_list_header::MidiCommandListHeader;
 
@@ -25,11 +25,11 @@ impl<'a> MidiCommandIterator<'a> {
 }
 
 impl<'a> Iterator for MidiCommandIterator<'a> {
-    type Item = TimedCommand<'a>;
+    type Item = MidiEvent<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.data.is_empty() {
-            match TimedCommand::from_be_bytes(self.data, self.read_delta_time, self.running_status) {
+            match MidiEvent::from_be_bytes(self.data, self.read_delta_time, self.running_status) {
                 Ok((command, new_offset)) => {
                     self.running_status = Some(command.command().status());
                     self.data = new_offset;

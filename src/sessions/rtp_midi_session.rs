@@ -16,7 +16,7 @@ use super::invite_responder::InviteResponder;
 use super::mdns::advertise_mdns;
 use super::rtp_port::RtpPort;
 use crate::packets::midi_packets::midi_command::MidiCommand;
-use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+use crate::packets::midi_packets::midi_event::MidiEvent;
 use crate::participant::Participant;
 use crate::sessions::control_port::ControlPort;
 use crate::sessions::midi_port::MidiPort;
@@ -166,7 +166,7 @@ impl RtpMidiSession {
         listeners.insert(event_type, Box::new(callback));
     }
 
-    pub async fn send_midi_batch(&self, commands: &[TimedCommand<'_>]) -> std::io::Result<()> {
+    pub async fn send_midi_batch(&self, commands: &[MidiEvent<'_>]) -> std::io::Result<()> {
         self.midi_port.send_midi_batch(self, commands).await
     }
 
