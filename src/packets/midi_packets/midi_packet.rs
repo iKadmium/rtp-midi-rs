@@ -6,10 +6,7 @@ use zerocopy::{
 
 use super::midi_command_iterator::MidiCommandIterator;
 use crate::packets::midi_packets::{
-    midi_command_list_body::MidiCommandListBody,
-    midi_command_list_header::{MidiCommandListFlags, MidiCommandListHeader},
-    midi_event::MidiEvent,
-    midi_packet_header::MidiPacketHeader,
+    midi_command_list_body::MidiCommandListBody, midi_command_list_header::MidiCommandListHeader, midi_event::MidiEvent, midi_packet_header::MidiPacketHeader,
 };
 
 #[derive(Debug)]
@@ -29,9 +26,7 @@ impl<'a> MidiPacket<'a> {
     pub(crate) fn new_as_bytes(sequence_number: U16, timestamp: U32, ssrc: U32, commands: &'a [MidiEvent]) -> Bytes {
         let header = MidiPacketHeader::new(sequence_number, timestamp, ssrc);
         let command_list_body = MidiCommandListBody::new_as_bytes(commands, false);
-        let b_flag = MidiCommandListFlags::needs_b_flag(command_list_body.len());
-        let flags = MidiCommandListFlags::new(b_flag, false, false, false);
-        let command_list_header = MidiCommandListHeader::new(flags, command_list_body.len());
+        let command_list_header = MidiCommandListHeader::build_for(&command_list_body);
 
         let mut buffer = BytesMut::with_capacity(std::mem::size_of::<MidiPacketHeader>() + command_list_body.len());
         buffer.put_slice(header.as_bytes());

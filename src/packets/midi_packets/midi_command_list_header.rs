@@ -67,6 +67,13 @@ impl MidiCommandListHeader {
         MidiCommandListHeader { flags, length }
     }
 
+    pub fn build_for(events: &[u8]) -> Self {
+        let length = events.len();
+        let b_flag = MidiCommandListFlags::needs_b_flag(length);
+        let flags = MidiCommandListFlags::new(b_flag, false, false, false);
+        Self::new(flags, length)
+    }
+
     pub fn flags(&self) -> &MidiCommandListFlags {
         &self.flags
     }

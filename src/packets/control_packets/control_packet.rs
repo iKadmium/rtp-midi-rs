@@ -47,27 +47,24 @@ impl ControlPacket<'_> {
                     ClockSyncPacket::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid clock sync packet"))?;
                 Ok(ControlPacket::ClockSync(clock_sync_packet))
             }
-            b"OK" => {
+            b"OK" | b"IN" => {
                 let (body, payload) =
                     SessionInitiationPacketBody::ref_from_prefix(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid acceptance packet"))?;
                 let name = CStr::from_bytes_with_nul(payload).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid name in acceptance packet"))?;
-                Ok(ControlPacket::Acceptance { body, name })
+                if header.command == *b"OK" {
+                    Ok(ControlPacket::Acceptance { body, name })
+                } else {
+                    Ok(ControlPacket::Invitation { body, name })
+                }
             }
-            b"IN" => {
-                let (body, payload) =
-                    SessionInitiationPacketBody::ref_from_prefix(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid invitation packet"))?;
-                let name = CStr::from_bytes_with_nul(payload).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid name in invitation packet"))?;
-                Ok(ControlPacket::Invitation { body, name })
-            }
-            b"NO" => {
+            b"NO" | b"BY" => {
                 let body =
                     SessionInitiationPacketBody::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid rejection packet"))?;
-                Ok(ControlPacket::Rejection(body))
-            }
-            b"BY" => {
-                let body =
-                    SessionInitiationPacketBody::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid termination packet"))?;
-                Ok(ControlPacket::Termination(body))
+                if header.command == *b"NO" {
+                    Ok(ControlPacket::Rejection(body))
+                } else {
+                    Ok(ControlPacket::Termination(body))
+                }
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
