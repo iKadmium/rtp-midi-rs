@@ -1,31 +1,33 @@
 use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket};
 
 #[derive(Debug)]
-pub enum RtpMidiPacket {
-    Midi(MidiPacket),
-    Control(ControlPacket),
+pub(crate) enum RtpMidiPacket<'a> {
+    Midi(MidiPacket<'a>),
+    Control(ControlPacket<'a>),
 }
 
-impl RtpMidiPacket {
-    pub fn parse(bytes: &[u8]) -> Result<Self, std::io::Error> {
+impl<'a> RtpMidiPacket<'a> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, std::io::Error> {
         if ControlPacket::is_control_packet(bytes) {
             ControlPacket::from_be_bytes(bytes).map(RtpMidiPacket::Control)
         } else {
-            MidiPacket::from_be_bytes(bytes).map(RtpMidiPacket::Midi)
+            MidiPacket::new(bytes).map(RtpMidiPacket::Midi)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use zerocopy::U16;
+    use zerocopy::network_endian::U32;
+
     use super::*;
-    use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacket;
     use crate::packets::midi_packets::midi_command::MidiCommand;
-    use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+    use crate::packets::midi_packets::midi_event::MidiEvent;
 
     #[test]
     fn test_parse_midi_packet() {
-        let commands = vec![TimedCommand::new(
+        let commands = vec![MidiEvent::new(
             None,
             MidiCommand::NoteOn {
                 channel: 1,
@@ -33,19 +35,18 @@ mod tests {
                 velocity: 127,
             },
         )];
-        let packet = MidiPacket::new(1, 1, 1, &commands);
-        let mut bytes = Vec::new();
-        let result = packet.write(&mut bytes, false);
-        assert!(result.is_ok());
+        let packet = MidiPacket::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands);
 
-        let parsed_packet = RtpMidiPacket::parse(&bytes).unwrap();
+        let parsed_packet = RtpMidiPacket::parse(&packet).unwrap();
         if let RtpMidiPacket::Midi(parsed_midi_packet) = parsed_packet {
             assert_eq!(parsed_midi_packet.sequence_number(), 1);
-            assert_eq!(parsed_midi_packet.timestamp(), 1);
-            assert_eq!(parsed_midi_packet.commands().len(), 1);
+            assert_eq!(parsed_midi_packet.timestamp(), 2);
+            assert_eq!(parsed_midi_packet.ssrc(), 3);
+            let values = parsed_midi_packet.commands().collect::<Vec<_>>();
+            assert_eq!(values.len(), 1);
             assert_eq!(
-                parsed_midi_packet.commands()[0].command(),
-                &MidiCommand::NoteOn {
+                values[0].command().to_owned(),
+                MidiCommand::NoteOn {
                     channel: 1,
                     key: 64,
                     velocity: 127
@@ -58,14 +59,11 @@ mod tests {
 
     #[test]
     fn test_parse_control_packet() {
-        let packet = SessionInitiationPacket::new_acknowledgment(1, 1, "Hello".to_string());
-        let mut bytes = Vec::new();
-        let result = packet.write(&mut bytes);
-        assert!(result.is_ok());
-        let parsed = RtpMidiPacket::parse(&bytes).unwrap();
+        let packet = ControlPacket::new_acceptance(U32::new(1), U32::new(1), c"Test Name");
+        let parsed = RtpMidiPacket::parse(&packet).unwrap();
 
         match parsed {
-            RtpMidiPacket::Control(ControlPacket::SessionInitiation(_)) => {
+            RtpMidiPacket::Control(ControlPacket::Acceptance { body: _, name: _ }) => {
                 // all good
             }
             _ => panic!("Expected ControlPacket"),

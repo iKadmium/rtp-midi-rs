@@ -1,22 +1,30 @@
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use log::info;
-    use rtpmidi::sessions::rtp_midi_session::{RtpMidiEventType, RtpMidiSession};
+    use rtpmidi::sessions::{
+        invite_responder::InviteResponder,
+        rtp_midi_session::{RtpMidiEventType, RtpMidiSession},
+    };
+    use tracing::{Level, event};
+    use tracing_subscriber::util::SubscriberInitExt;
 
-    colog::default_builder().filter_level(log::LevelFilter::Info).init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_target(false)
+        .finish()
+        .init();
 
-    let server = RtpMidiSession::new("My Session".to_string(), 5004);
+    let server = RtpMidiSession::start(5004, "My Session", 12345, InviteResponder::Accept)
+        .await
+        .expect("Failed to start RTP-MIDI session");
 
     server
         .add_listener(RtpMidiEventType::MidiPacket, move |data| {
-            for command in data.commands() {
-                info!("Received command: {:?}", command);
-            }
+            event!(Level::INFO, "Received command: {:?}", data);
         })
         .await;
-
-    server.start(5004, RtpMidiSession::accept_all_invitations).await.unwrap();
 
     tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
 }

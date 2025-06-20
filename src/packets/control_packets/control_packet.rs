@@ -1,54 +1,109 @@
-use std::io::{Cursor, Error, ErrorKind, Write};
-
-use super::{
-    clock_sync_packet::ClockSyncPacket,
-    session_initiation_packet::SessionInitiationPacket, // Ensure ReadOptionalStringExt is in scope if SessionInitiationPacket::read relies on it being used on the reader directly.
+use bytes::{BufMut, Bytes, BytesMut};
+use std::{
+    ffi::CStr,
+    io::{Error, ErrorKind},
 };
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, network_endian::U32};
 
-#[derive(Debug)]
-pub enum ControlPacket {
-    ClockSync(ClockSyncPacket),
-    SessionInitiation(SessionInitiationPacket),
+use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
+
+use super::clock_sync_packet::ClockSyncPacket;
+
+const CONTROL_PACKET_MARKER: [u8; 2] = [255, 255];
+
+#[derive(Debug, KnownLayout, Unaligned, IntoBytes, Immutable, FromBytes)]
+#[repr(C)]
+pub struct ControlPacketHeader {
+    marker: [u8; 2],
+    pub command: [u8; 2],
 }
 
-impl ControlPacket {
-    pub(crate) const HEADER_SIZE: usize = 4;
-
-    pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
-        if buffer.len() < 4 {
-            return Err(Error::new(ErrorKind::InvalidData, "Buffer too short to be a valid control packet"));
+impl ControlPacketHeader {
+    pub fn new(command: [u8; 2]) -> ControlPacketHeader {
+        ControlPacketHeader {
+            marker: CONTROL_PACKET_MARKER,
+            command,
         }
+    }
+}
 
-        let command = if buffer[0] == 255 && buffer[1] == 255 {
-            &buffer[2..4]
-        } else {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid control packet header"));
-        };
-        let mut reader = Cursor::new(&buffer[4..]);
-        match command {
+#[derive(Debug)]
+pub enum ControlPacket<'a> {
+    ClockSync(&'a ClockSyncPacket),
+    Invitation { body: &'a SessionInitiationPacketBody, name: &'a CStr },
+    Acceptance { body: &'a SessionInitiationPacketBody, name: &'a CStr },
+    Rejection(&'a SessionInitiationPacketBody),
+    Termination(&'a SessionInitiationPacketBody),
+}
+
+impl ControlPacket<'_> {
+    pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
+        let (header, remainder) =
+            ControlPacketHeader::ref_from_prefix(buffer).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid control packet header"))?;
+
+        match &header.command {
             b"CK" => {
-                let clock_sync_packet = ClockSyncPacket::read(&mut reader)?;
+                let clock_sync_packet =
+                    ClockSyncPacket::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid clock sync packet"))?;
                 Ok(ControlPacket::ClockSync(clock_sync_packet))
             }
-            b"OK" | b"IN" | b"NO" | b"BY" => {
-                let body = SessionInitiationPacket::read(&mut reader, command)?;
-                Ok(ControlPacket::SessionInitiation(body))
+            b"OK" | b"IN" => {
+                let (body, payload) =
+                    SessionInitiationPacketBody::ref_from_prefix(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid acceptance packet"))?;
+                let name = CStr::from_bytes_with_nul(payload).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid name in acceptance packet"))?;
+                if header.command == *b"OK" {
+                    Ok(ControlPacket::Acceptance { body, name })
+                } else {
+                    Ok(ControlPacket::Invitation { body, name })
+                }
+            }
+            b"NO" | b"BY" => {
+                let body =
+                    SessionInitiationPacketBody::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid rejection packet"))?;
+                if header.command == *b"NO" {
+                    Ok(ControlPacket::Rejection(body))
+                } else {
+                    Ok(ControlPacket::Termination(body))
+                }
             }
             _ => Err(Error::new(
                 ErrorKind::InvalidData,
-                format!("Unknown control packet, {}", String::from_utf8_lossy(command)),
+                format!("Unknown control packet, {}", String::from_utf8_lossy(&header.command)),
             ))?,
         }
     }
 
-    pub fn write_header<W: Write>(writer: &mut W, command: &[u8; 2]) -> std::io::Result<usize> {
-        writer.write_all(&[255, 255])?;
-        writer.write_all(command)?;
-        Ok(4)
+    pub fn is_control_packet(buffer: &[u8]) -> bool {
+        buffer.starts_with(&CONTROL_PACKET_MARKER)
     }
 
-    pub fn is_control_packet(buffer: &[u8]) -> bool {
-        buffer.len() >= 4 && buffer[0] == 255 && buffer[1] == 255
+    fn new_initiator(initiator_token: U32, sender_ssrc: U32, command: [u8; 2], name: Option<&CStr>) -> Bytes {
+        let header = ControlPacketHeader::new(command);
+        let packet = SessionInitiationPacketBody::new(initiator_token, sender_ssrc);
+        let name_length = name.map_or(0, |n| n.count_bytes() + 1); // +1 for null terminator
+        let mut buffer = BytesMut::with_capacity(std::mem::size_of::<ControlPacketHeader>() + std::mem::size_of::<SessionInitiationPacketBody>() + name_length);
+        buffer.put_slice(header.as_bytes());
+        buffer.put_slice(packet.as_bytes());
+        if let Some(name) = name {
+            buffer.put_slice(name.to_bytes_with_nul());
+        }
+        buffer.freeze()
+    }
+
+    pub fn new_acceptance(initiator_token: U32, sender_ssrc: U32, name: &CStr) -> Bytes {
+        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"OK", Some(name))
+    }
+
+    pub fn new_invitation(initiator_token: U32, sender_ssrc: U32, name: &CStr) -> Bytes {
+        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"IN", Some(name))
+    }
+
+    pub fn new_rejection(initiator_token: U32, sender_ssrc: U32) -> Bytes {
+        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"NO", None)
+    }
+
+    pub fn new_termination(initiator_token: U32, sender_ssrc: U32) -> Bytes {
+        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"BY", None)
     }
 }
 
@@ -74,15 +129,6 @@ mod tests {
         if let Err(e) = result {
             assert_eq!(e.kind(), ErrorKind::InvalidData);
         }
-    }
-
-    #[test]
-    fn test_write_header() {
-        let mut buffer = Vec::new();
-        let command = b"CK";
-        let result = ControlPacket::write_header(&mut buffer, command);
-        assert!(result.is_ok());
-        assert_eq!(buffer, vec![255, 255, 67, 75]);
     }
 
     #[test]
@@ -141,10 +187,10 @@ mod tests {
 
         let result = ControlPacket::from_be_bytes(&buffer);
         assert!(result.is_ok());
-        if let ControlPacket::SessionInitiation(_packet) = result.unwrap() {
+        if let ControlPacket::Invitation { body: _, name: _ } = result.unwrap() {
             // all good!
         } else {
-            panic!("Expected SessionInitiation packet");
+            panic!("Expected Invitation packet");
         }
     }
 }

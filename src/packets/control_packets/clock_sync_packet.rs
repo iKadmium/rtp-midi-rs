@@ -1,59 +1,35 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write};
+use bytes::{BufMut, Bytes, BytesMut};
+use zerocopy::{
+    FromBytes, Immutable, IntoBytes, KnownLayout,
+    network_endian::{U32, U64},
+};
 
-use super::control_packet::ControlPacket;
+use crate::packets::control_packets::control_packet::ControlPacketHeader;
 
-#[derive(Debug)]
+#[derive(Debug, KnownLayout, IntoBytes, Immutable, FromBytes)]
+#[repr(C, packed)]
 pub struct ClockSyncPacket {
+    pub sender_ssrc: U32,
     pub count: u8,
-    pub timestamps: [u64; 3],
-    pub sender_ssrc: u32,
+    _reserved: [u8; 3], // Reserved bytes
+    pub timestamps: [U64; 3],
 }
 
 impl ClockSyncPacket {
     pub const SIZE: usize = 36;
 
-    pub fn new(count: u8, timestamps: [u64; 3], sender_ssrc: u32) -> Self {
-        ClockSyncPacket {
+    pub fn new_as_bytes(count: u8, timestamps: [U64; 3], sender_ssrc: U32) -> Bytes {
+        let header = ControlPacketHeader::new(*b"CK");
+        let packet = ClockSyncPacket {
             count,
+            _reserved: [0; 3], // Reserved bytes
             timestamps,
             sender_ssrc,
-        }
-    }
-
-    pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let sender_ssrc = reader.read_u32::<BigEndian>()?;
-        let count = reader.read_u8()?;
-
-        // Skip reserved bytes
-        for _ in 0..3 {
-            reader.read_u8()?;
-        }
-
-        let mut timestamps = [0; 3];
-
-        for i in timestamps.iter_mut() {
-            *i = reader.read_u64::<BigEndian>()?;
-        }
-
-        Ok(ClockSyncPacket::new(count, timestamps, sender_ssrc))
-    }
-
-    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
-        ControlPacket::write_header(writer, b"CK")?;
-        writer.write_u32::<BigEndian>(self.sender_ssrc)?;
-        writer.write_u8(self.count)?;
-        writer.write_all(&[0, 0, 0])?; // Reserved bytes
-        writer.write_u64::<BigEndian>(self.timestamps[0])?;
-        writer.write_u64::<BigEndian>(self.timestamps[1])?;
-        writer.write_u64::<BigEndian>(self.timestamps[2])?;
-        Ok(Self::SIZE)
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(Self::SIZE);
-        self.write(&mut buffer).expect("Failed to write ClockSyncPacket");
-        buffer
+        };
+        let mut buffer = BytesMut::with_capacity(Self::SIZE);
+        buffer.put_slice(header.as_bytes());
+        buffer.put_slice(packet.as_bytes());
+        buffer.freeze()
     }
 }
 
@@ -72,13 +48,11 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // timestamp 3
         ]; // Example buffer for a ClockSync packet
 
-        let mut cursor = std::io::Cursor::new(buffer);
-
-        let result = ClockSyncPacket::read(&mut cursor);
+        let result = ClockSyncPacket::ref_from_bytes(&buffer);
         match result {
             Ok(packet) => {
-                assert_eq!(packet.count, 0);
                 assert_eq!(packet.sender_ssrc, 4112101049);
+                assert_eq!(packet.count, 0);
                 assert_eq!(packet.timestamps[0], 1926546830);
             }
             Err(e) => panic!("Failed to read ClockSync packet: {}", e),
@@ -95,9 +69,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x04, 0x3D, 0xC7, 0xDF, // timestamp 2
             0x00, 0x00, 0x00, 0x00, 0x72, 0xD4, 0xC5, 0xCD, // timestamp 3
         ];
-        let mut cursor = std::io::Cursor::new(buffer);
 
-        let result = ClockSyncPacket::read(&mut cursor);
+        let result = ClockSyncPacket::ref_from_bytes(&buffer);
         match result {
             Ok(packet) => {
                 assert_eq!(packet.count, 2);
@@ -121,21 +94,21 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // timestamp 2
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
         ];
-        let packet = ClockSyncPacket::new(2, [1, 2, 3], 4112101049);
-        let mut buffer = Vec::new();
-        let result = packet.write(&mut buffer);
-        assert!(result.is_ok());
-        assert_eq!(buffer.len(), ClockSyncPacket::SIZE);
-        assert_eq!(buffer, expected);
+        let packet = ClockSyncPacket::new_as_bytes(2, [U64::new(1), U64::new(2), U64::new(3)], U32::new(4112101049));
+
+        assert_eq!(packet.len(), ClockSyncPacket::SIZE);
+        assert_eq!(packet.as_bytes(), expected);
     }
 
     #[test]
     fn test_new() {
-        let packet = ClockSyncPacket::new(2, [1, 2, 3], 4112101049);
+        let packet_bytes = ClockSyncPacket::new_as_bytes(2, [U64::new(1), U64::new(2), U64::new(3)], U32::new(4112101049));
+        let packet = ClockSyncPacket::ref_from_bytes(packet_bytes[4..].as_ref()).unwrap();
+
         assert_eq!(packet.count, 2);
-        assert_eq!(packet.sender_ssrc, 4112101049);
-        assert_eq!(packet.timestamps[0], 1);
-        assert_eq!(packet.timestamps[1], 2);
-        assert_eq!(packet.timestamps[2], 3);
+        assert_eq!(packet.sender_ssrc, U32::new(4112101049));
+        assert_eq!(packet.timestamps[0], U64::new(1));
+        assert_eq!(packet.timestamps[1], U64::new(2));
+        assert_eq!(packet.timestamps[2], U64::new(3));
     }
 }

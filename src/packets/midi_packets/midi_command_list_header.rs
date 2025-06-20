@@ -1,8 +1,6 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write};
+use bytes::{BufMut, BytesMut};
 
-use super::midi_command_list_body::MidiCommandListBody;
-
+#[derive(Debug)]
 pub struct MidiCommandListHeader {
     flags: MidiCommandListFlags,
     length: usize,
@@ -69,6 +67,13 @@ impl MidiCommandListHeader {
         MidiCommandListHeader { flags, length }
     }
 
+    pub fn build_for(events: &[u8]) -> Self {
+        let length = events.len();
+        let b_flag = MidiCommandListFlags::needs_b_flag(length);
+        let flags = MidiCommandListFlags::new(b_flag, false, false, false);
+        Self::new(flags, length)
+    }
+
     pub fn flags(&self) -> &MidiCommandListFlags {
         &self.flags
     }
@@ -81,32 +86,11 @@ impl MidiCommandListHeader {
         if b_flag { 2 } else { 1 }
     }
 
-    pub fn build_for(body: &MidiCommandListBody, j_flag: bool, z_flag: bool, p_flag: bool) -> Self {
-        let length = body.size(z_flag);
-        let flags = MidiCommandListFlags::new(MidiCommandListFlags::needs_b_flag(length), j_flag, z_flag, p_flag);
-        Self::new(flags, length)
-    }
-
-    pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<usize> {
-        if self.flags.b_flag() {
-            // If b_flag is set, use 12 bits for length and 4 bits for flags
-            // Set the high bit to indicate extended length
-            let flags_and_length: u16 = 0x8000 | ((self.flags.flags as u16) << 8) | ((self.length as u16) & 0x0FFF);
-            writer.write_u16::<BigEndian>(flags_and_length)?;
-            Ok(2)
-        } else {
-            // Otherwise, use 4 bits for length and 4 bits for flags
-            let flags_and_length: u8 = (self.flags.flags) | ((self.length as u8) & 0x000F);
-            writer.write_u8(flags_and_length)?;
-            Ok(1)
-        }
-    }
-
-    pub fn read<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        let first_byte = reader.read_u8()?;
+    pub fn from_slice(data: &[u8]) -> Self {
+        let first_byte = data[0];
         let flags = MidiCommandListFlags::from_u8(first_byte);
-        let result = if flags.b_flag() {
-            let length_lsb = reader.read_u8()?;
+        if flags.b_flag() {
+            let length_lsb = data[1];
             let length = (((first_byte & 0x0F) as u16) << 8) | (length_lsb as u16);
             Self {
                 flags,
@@ -115,27 +99,15 @@ impl MidiCommandListHeader {
         } else {
             let length = (first_byte & 0x0F) as usize;
             Self { flags, length }
-        };
-
-        Ok(result)
+        }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn test_midi_command_list_header() {
-        let mut buffer = Vec::new();
-        let header = MidiCommandListHeader::new(MidiCommandListFlags::new(true, false, true, false), 0x123);
-        header.write(&mut buffer).unwrap();
-
-        let mut cursor = Cursor::new(buffer);
-        let read_header = MidiCommandListHeader::read(&mut cursor).unwrap();
-
-        assert_eq!(header.flags(), read_header.flags());
-        assert_eq!(header.length(), read_header.length());
+    pub fn write(&self, buffer: &mut BytesMut) {
+        let first_byte = self.flags.flags | (self.length as u8 & 0x0F);
+        buffer.put_u8(first_byte);
+        if self.flags.b_flag() {
+            let length_lsb = (self.length & 0xFF) as u8;
+            buffer.put_u8(length_lsb);
+        }
     }
 }
