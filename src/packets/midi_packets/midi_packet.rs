@@ -1,10 +1,16 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use zerocopy::{
-    network_endian::{U16, U32}, FromBytes, IntoBytes
+    FromBytes, IntoBytes,
+    network_endian::{U16, U32},
 };
 
 use super::midi_command_iterator::MidiCommandIterator;
-use crate::packets::midi_packets::{midi_command_list_body::MidiCommandListBody, midi_command_list_header::{MidiCommandListFlags, MidiCommandListHeader}, midi_event::MidiEvent, midi_packet_header::MidiPacketHeader};
+use crate::packets::midi_packets::{
+    midi_command_list_body::MidiCommandListBody,
+    midi_command_list_header::{MidiCommandListFlags, MidiCommandListHeader},
+    midi_event::MidiEvent,
+    midi_packet_header::MidiPacketHeader,
+};
 
 #[derive(Debug)]
 pub(crate) struct MidiPacket<'a> {

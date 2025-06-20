@@ -6,7 +6,7 @@ use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
 use crate::packets::midi_packets::midi_command::MidiCommand;
 use crate::packets::midi_packets::midi_event::MidiEvent;
-use crate::packets::midi_packets::midi_packet_zero_alloc::MidiPacket;
+use crate::packets::midi_packets::midi_packet::MidiPacket;
 use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
 use crate::sessions::rtp_midi_session::{RtpMidiEventType, current_timestamp_u32};

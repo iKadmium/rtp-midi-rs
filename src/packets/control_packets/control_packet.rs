@@ -1,9 +1,8 @@
+use bytes::{BufMut, Bytes, BytesMut};
 use std::{
     ffi::CStr,
     io::{Error, ErrorKind},
 };
-
-use bytes::{BufMut, Bytes, BytesMut};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, network_endian::U32};
 
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;

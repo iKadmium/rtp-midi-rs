@@ -1,4 +1,4 @@
-use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet_zero_alloc::MidiPacket};
+use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket};
 
 #[derive(Debug)]
 pub(crate) enum RtpMidiPacket<'a> {
