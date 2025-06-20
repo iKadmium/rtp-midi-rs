@@ -1,9 +1,10 @@
-use super::{midi_command_list_header::MidiCommandListHeader, midi_timed_command_zero_alloc::MidiTimedCommandZeroAlloc};
+use crate::packets::midi_packets::midi_timed_command::TimedCommand;
+
+use super::midi_command_list_header::MidiCommandListHeader;
 
 #[derive(Debug)]
 pub(crate) struct MidiCommandIterator<'a> {
     data: &'a [u8],
-    offset: usize,
     running_status: Option<u8>,
     read_delta_time: bool,
 }
@@ -17,7 +18,6 @@ impl<'a> MidiCommandIterator<'a> {
         let slice = &data[offset..length + offset];
         MidiCommandIterator {
             data: slice,
-            offset: 0,
             running_status: None,
             read_delta_time,
         }
@@ -25,14 +25,14 @@ impl<'a> MidiCommandIterator<'a> {
 }
 
 impl<'a> Iterator for MidiCommandIterator<'a> {
-    type Item = MidiTimedCommandZeroAlloc<'a>;
+    type Item = TimedCommand<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset < self.data.len() {
-            match MidiTimedCommandZeroAlloc::from_be_bytes(&self.data[self.offset..], self.read_delta_time, self.running_status) {
-                Ok((command, bytes_read)) => {
+        if !self.data.is_empty() {
+            match TimedCommand::from_be_bytes(self.data, self.read_delta_time, self.running_status) {
+                Ok((command, new_offset)) => {
                     self.running_status = Some(command.command().status());
-                    self.offset += bytes_read;
+                    self.data = new_offset;
                     self.read_delta_time = true;
                     Some(command)
                 }

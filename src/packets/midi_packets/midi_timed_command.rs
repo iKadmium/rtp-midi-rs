@@ -1,4 +1,6 @@
-use std::io::Write;
+use bytes::BytesMut;
+
+use crate::packets::midi_packets::delta_time::read_delta_time;
 
 use super::{delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
 
@@ -21,19 +23,30 @@ impl<'a> TimedCommand<'a> {
         &self.command
     }
 
-    pub(super) fn write<W: Write>(&self, writer: &mut W, running_status: Option<u8>, write_delta_time: bool) -> Result<usize, std::io::Error> {
-        let mut bytes_written = 0;
+    pub fn from_be_bytes(bytes: &'a [u8], should_read_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
+        let mut delta_time = None;
 
+        let mut bytes = bytes;
+        if should_read_delta_time {
+            let (dt, new_bytes) = read_delta_time(bytes)?;
+            delta_time = Some(dt);
+            bytes = new_bytes;
+        }
+
+        let (command, offset) = MidiCommand::from_be_bytes(bytes, running_status)?;
+
+        Ok((TimedCommand { delta_time, command }, offset))
+    }
+
+    pub(super) fn write(&self, bytes: &mut BytesMut, running_status: Option<u8>, write_delta_time: bool) {
         if write_delta_time {
             match self.delta_time {
-                Some(dt) => bytes_written += writer.write_delta_time(dt)?,
-                None => bytes_written += writer.write_delta_time(0)?,
+                Some(dt) => bytes.write_delta_time(dt),
+                None => bytes.write_delta_time(0),
             }
         }
 
-        bytes_written += self.command.write(writer, running_status)?;
-
-        Ok(bytes_written)
+        self.command.write(bytes, running_status);
     }
 }
 
@@ -60,76 +73,72 @@ mod tests {
 
     #[test]
     fn test_timed_command_write() {
-        let mut expected_bytes = vec![0; 10];
+        let mut expected_bytes = BytesMut::with_capacity(10);
 
         let delta_time = 0x123456;
-        expected_bytes.write_delta_time(delta_time).unwrap();
+        expected_bytes.write_delta_time(delta_time);
         let command = MidiCommand::NoteOn {
             channel: 7,
             key: 0x40,
             velocity: 0x7F,
         };
-        command.write(&mut expected_bytes, None).unwrap();
+        command.write(&mut expected_bytes, None);
 
         let timed_command = TimedCommand {
             delta_time: Some(delta_time),
             command: command.clone(),
         };
 
-        let mut bytes = vec![0u8; 10];
-        let bytes_written = timed_command.write(&mut bytes, None, true).unwrap();
+        let mut bytes = BytesMut::with_capacity(10);
+        timed_command.write(&mut bytes, None, true);
 
-        assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
+        assert_eq!(bytes[..], expected_bytes[..]);
     }
 
     #[test]
     fn test_timed_command_write_without_delta_time() {
-        let mut expected_bytes = Vec::<u8>::new();
-        let mut expected_bytes_written = 0;
+        let mut expected_bytes = BytesMut::with_capacity(10);
 
         let command = MidiCommand::NoteOn {
             channel: 7,
             key: 0x40,
             velocity: 0x7F,
         };
-        expected_bytes_written += command.write(&mut expected_bytes, None).unwrap();
+        command.write(&mut expected_bytes, None);
 
         let timed_command = TimedCommand {
             delta_time: None,
             command: command.clone(),
         };
 
-        let mut bytes = Vec::<u8>::new();
-        let bytes_written = timed_command.write(&mut bytes, None, false).unwrap();
+        let mut bytes = BytesMut::with_capacity(10);
+        timed_command.write(&mut bytes, None, false);
 
-        assert_eq!(bytes_written, expected_bytes_written);
-        assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
+        assert_eq!(bytes[..], expected_bytes[..]);
     }
 
     #[test]
     fn test_timed_command_write_with_zero_delta_time() {
-        let mut expected_bytes = vec![0; 10];
-        let mut expected_bytes_written = 0;
+        let mut expected_bytes = BytesMut::with_capacity(10);
 
         let delta_time = 0;
-        expected_bytes_written += expected_bytes.write_delta_time(delta_time).unwrap();
+        expected_bytes.write_delta_time(delta_time);
 
         let command = MidiCommand::NoteOn {
             channel: 7,
             key: 0x40,
             velocity: 0x7F,
         };
-        expected_bytes_written += command.write(&mut expected_bytes, None).unwrap();
+        command.write(&mut expected_bytes, None);
 
         let timed_command = TimedCommand {
             delta_time: None,
             command: command.clone(),
         };
 
-        let mut bytes = vec![0u8; 10];
-        let bytes_written = timed_command.write(&mut bytes, None, true).unwrap();
+        let mut bytes = BytesMut::with_capacity(10);
+        timed_command.write(&mut bytes, None, true);
 
-        assert_eq!(bytes_written, expected_bytes_written);
-        assert_eq!(bytes[..bytes_written], expected_bytes[..bytes_written]);
+        assert_eq!(bytes[..], expected_bytes[..]);
     }
 }

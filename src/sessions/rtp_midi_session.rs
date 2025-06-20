@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, event, instrument};
+use zerocopy::network_endian::{U32, U64};
 
 use super::MAX_UDP_PACKET_SIZE;
 use super::host_syncer::HostSyncer;
@@ -30,15 +31,15 @@ pub enum RtpMidiEventType {
 
 #[derive(Clone)]
 pub struct RtpMidiSession {
-    pub(super) participants: Arc<Mutex<HashMap<u32, Participant>>>,              // key by ssrc
-    pub(super) pending_invitations: Arc<Mutex<HashMap<u32, PendingInvitation>>>, // key by ssrc
+    pub(super) participants: Arc<Mutex<HashMap<U32, Participant>>>,              // key by ssrc
+    pub(super) pending_invitations: Arc<Mutex<HashMap<U32, PendingInvitation>>>, // key by ssrc
     pub(super) midi_port: Arc<MidiPort>,
 
     listeners: Arc<Mutex<ListenerSet>>,
     control_port: Arc<ControlPort>,
     host_syncer: Arc<HostSyncer>,
     cancel_token: Arc<CancellationToken>,
-    name: String,
+    name: CString,
     #[cfg(feature = "mdns")]
     mdns: mdns_sd::ServiceDaemon,
 }
@@ -46,21 +47,23 @@ pub struct RtpMidiSession {
 #[derive(Debug, Clone)]
 pub(super) struct PendingInvitation {
     pub addr: SocketAddr,
-    pub token: u32,
+    pub token: U32,
     pub name: CString,
 }
 
 impl RtpMidiSession {
     async fn bind(port: u16, name: &str, ssrc: u32) -> std::io::Result<Self> {
+        let cstr_name = CString::new(name).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
         let context = RtpMidiSession {
             participants: Arc::new(Mutex::new(HashMap::new())),
             pending_invitations: Arc::new(Mutex::new(HashMap::new())),
-            control_port: Arc::new(ControlPort::bind(port, name, ssrc).await?),
-            midi_port: Arc::new(MidiPort::bind(port + 1, name, ssrc).await?),
+            control_port: Arc::new(ControlPort::bind(port, cstr_name.to_owned(), U32::new(ssrc)).await?),
+            midi_port: Arc::new(MidiPort::bind(port + 1, cstr_name.to_owned(), U32::new(ssrc)).await?),
             host_syncer: Arc::new(HostSyncer::new()),
             listeners: Arc::new(Mutex::new(HashMap::new())),
             cancel_token: Arc::new(CancellationToken::new()),
-            name: name.to_string(),
+            name: cstr_name,
             #[cfg(feature = "mdns")]
             mdns: advertise_mdns(name, port).map_err(|e| std::io::Error::other(e.to_string()))?,
         };
@@ -172,12 +175,18 @@ impl RtpMidiSession {
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        self.name.to_str().unwrap_or("Unnamed Session")
     }
 }
 
-pub fn current_timestamp(start_time: Instant) -> u64 {
-    (Instant::now() - start_time).as_micros() as u64 / 100
+pub fn current_timestamp(start_time: Instant) -> U64 {
+    let time = (Instant::now() - start_time).as_micros() as u64 / 100;
+    U64::new(time)
+}
+
+pub fn current_timestamp_u32(start_time: Instant) -> U32 {
+    let time = (Instant::now() - start_time).as_micros() as u64 / 100;
+    U32::new(time as u32)
 }
 
 impl Drop for RtpMidiSession {

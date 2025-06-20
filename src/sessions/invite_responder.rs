@@ -1,8 +1,8 @@
-use std::net::SocketAddr;
+use std::{ffi::CStr, net::SocketAddr};
 
-use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacket;
+use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
 
-pub type InviteHandler = dyn Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync + 'static;
+pub type InviteHandler = dyn Fn(&SessionInitiationPacketBody, &CStr, &SocketAddr) -> bool + Send + Sync + 'static;
 
 pub enum InviteResponder {
     Accept,
@@ -11,17 +11,17 @@ pub enum InviteResponder {
 }
 
 impl InviteResponder {
-    pub fn handle(&self, packet: &SessionInitiationPacket, addr: &SocketAddr) -> bool {
+    pub fn handle(&self, packet: &SessionInitiationPacketBody, name: &CStr, addr: &SocketAddr) -> bool {
         match self {
             InviteResponder::Accept => true,
             InviteResponder::Reject => false,
-            InviteResponder::Custom(handler) => handler(packet, addr),
+            InviteResponder::Custom(handler) => handler(packet, name, addr),
         }
     }
 
     pub fn new<F>(handler: F) -> InviteResponder
     where
-        F: Fn(&SessionInitiationPacket, &SocketAddr) -> bool + Send + Sync + 'static,
+        F: Fn(&SessionInitiationPacketBody, &CStr, &SocketAddr) -> bool + Send + Sync + 'static,
     {
         InviteResponder::Custom(Box::new(handler))
     }

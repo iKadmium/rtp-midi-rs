@@ -1,6 +1,7 @@
 use super::rtp_midi_session::RtpMidiSession;
 use std::time::{Duration, Instant};
 use tracing::{Level, event, instrument};
+use zerocopy::U64;
 
 pub(super) struct HostSyncer {}
 impl HostSyncer {
@@ -34,7 +35,7 @@ impl HostSyncer {
     }
 
     async fn send_clock_syncs(&self, ctx: &RtpMidiSession) {
-        let timestamps = [0, 0, 0];
+        let timestamps = [U64::new(0); 3];
         let lock = ctx.participants.lock().await;
         let participants: Vec<_> = lock.values().cloned().collect();
         drop(lock);

@@ -20,7 +20,7 @@ async fn main() {
         5004,
         "My Session",
         54321,
-        InviteResponder::new(|packet, _addr| packet.name() == Some("Bob's jam session")),
+        InviteResponder::new(|_packet, name, _addr| name.to_str().unwrap() == "Bob's jam session"),
     )
     .await
     .expect("Failed to start RTP MIDI session");

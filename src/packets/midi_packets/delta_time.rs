@@ -1,14 +1,28 @@
-use byteorder::WriteBytesExt;
-use std::io::Write;
+use bytes::{BufMut, BytesMut};
 
-pub(crate) trait WriteDeltaTimeExt: std::io::Write {
-    fn write_delta_time(&mut self, delta_time: u32) -> std::io::Result<usize>;
-    fn delta_time_size(delta_time: u32) -> usize;
+pub(crate) fn delta_time_size(delta_time: u32) -> usize {
+    let mut size = 0;
+    let mut value = delta_time;
+
+    while value > 0 {
+        size += 1;
+        value >>= 7;
+    }
+
+    if size == 0 {
+        size = 1; // At least one byte for zero
+    }
+
+    size
 }
 
-impl<W: Write> WriteDeltaTimeExt for W {
-    fn write_delta_time(&mut self, delta_time: u32) -> std::io::Result<usize> {
-        let num_bytes = Self::delta_time_size(delta_time);
+pub(crate) trait WriteDeltaTimeExt {
+    fn write_delta_time(&mut self, delta_time: u32);
+}
+
+impl WriteDeltaTimeExt for BytesMut {
+    fn write_delta_time(&mut self, delta_time: u32) {
+        let num_bytes = delta_time_size(delta_time);
         let value_to_write = delta_time;
 
         for i in (0..num_bytes).rev() {
@@ -16,26 +30,24 @@ impl<W: Write> WriteDeltaTimeExt for W {
             if i > 0 {
                 byte |= 0x80; // Set the continuation bit
             }
-            self.write_u8(byte)?;
+            self.put_u8(byte);
         }
-        Ok(num_bytes)
+    }
+}
+
+pub fn read_delta_time(bytes: &[u8]) -> std::io::Result<(u32, &[u8])> {
+    let mut value: u32 = 0;
+    let mut shift: u8 = 0;
+
+    for (bytes_read, &byte) in bytes.iter().enumerate() {
+        value |= ((byte & 0x7F) as u32) << shift;
+        if byte & 0x80 == 0 {
+            return Ok((value, &bytes[bytes_read..]));
+        }
+        shift += 7;
     }
 
-    fn delta_time_size(delta_time: u32) -> usize {
-        let mut size = 0;
-        let mut value = delta_time;
-
-        while value > 0 {
-            size += 1;
-            value >>= 7;
-        }
-
-        if size == 0 {
-            size = 1; // At least one byte for zero
-        }
-
-        size
-    }
+    Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid delta time encoding"))
 }
 
 #[cfg(test)]
@@ -44,9 +56,9 @@ mod tests {
 
     fn test_delta_time_rw(delta_time: u32, expected_bytes: &[u8]) {
         // Test writing
-        let mut buffer: Vec<u8> = Vec::new();
-        let bytes_written = buffer.write_delta_time(delta_time).unwrap();
-        assert_eq!(bytes_written, expected_bytes.len());
+        let mut buffer = BytesMut::with_capacity(10);
+        buffer.write_delta_time(delta_time);
+        assert_eq!(buffer.len(), expected_bytes.len());
         assert_eq!(buffer, expected_bytes);
     }
 
@@ -94,13 +106,13 @@ mod tests {
 
     #[test]
     fn test_size_calculation() {
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0), 1);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x7F), 1);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x80), 2);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x3FFF), 2);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x4000), 3);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x1FFFFF), 3);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x200000), 4);
-        assert_eq!(<Vec<u8> as WriteDeltaTimeExt>::delta_time_size(0x0FFFFFFF), 4);
+        assert_eq!(delta_time_size(0), 1);
+        assert_eq!(delta_time_size(0x7F), 1);
+        assert_eq!(delta_time_size(0x80), 2);
+        assert_eq!(delta_time_size(0x3FFF), 2);
+        assert_eq!(delta_time_size(0x4000), 3);
+        assert_eq!(delta_time_size(0x1FFFFF), 3);
+        assert_eq!(delta_time_size(0x200000), 4);
+        assert_eq!(delta_time_size(0x0FFFFFFF), 4);
     }
 }

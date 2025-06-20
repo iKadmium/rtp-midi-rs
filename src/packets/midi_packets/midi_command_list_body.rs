@@ -1,5 +1,8 @@
-use super::{delta_time::WriteDeltaTimeExt, midi_timed_command::TimedCommand};
-use std::io::Write;
+use bytes::{Bytes, BytesMut};
+
+use crate::packets::midi_packets::delta_time::delta_time_size;
+
+use super::midi_timed_command::TimedCommand;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
@@ -8,16 +11,26 @@ pub struct MidiCommandListBody<'a> {
 }
 
 impl<'a> MidiCommandListBody<'a> {
-    pub fn new(commands: &'a [TimedCommand]) -> Self {
-        MidiCommandListBody { commands }
+    pub fn new_as_bytes(commands: &'a [TimedCommand], z_flag: bool) -> Bytes {
+        let mut buffer = BytesMut::with_capacity(Self::size(commands, false));
+
+        let mut write_delta_time = z_flag;
+        let mut running_status: Option<u8> = None;
+        for command in commands {
+            command.write(&mut buffer, running_status, write_delta_time);
+            running_status = Some(command.command().status());
+            write_delta_time = true;
+        }
+
+        buffer.freeze()
     }
 
-    pub fn size(&self, z_flag: bool) -> usize {
+    pub fn size(commands: &[TimedCommand], z_flag: bool) -> usize {
         let mut length: usize = 0;
         let mut running_status: Option<u8> = None;
-        for (i, command) in self.commands.iter().enumerate() {
+        for (i, command) in commands.iter().enumerate() {
             if i > 0 || z_flag {
-                length += <Vec<u8> as WriteDeltaTimeExt>::delta_time_size(command.delta_time())
+                length += delta_time_size(command.delta_time())
             }
             if Some(command.command().status()) != running_status {
                 length += 1;
@@ -31,18 +44,5 @@ impl<'a> MidiCommandListBody<'a> {
         }
 
         length
-    }
-
-    pub fn write<W: Write>(&self, writer: &mut W, z_flag: bool) -> Result<usize, std::io::Error> {
-        let mut offset = 0;
-        let mut running_status: Option<u8> = None;
-        for command in self.commands {
-            let write_delta_time = if offset == 0 { z_flag } else { true };
-            let bytes_written = command.write(writer, running_status, write_delta_time)?;
-            running_status = Some(command.command().status());
-            offset += bytes_written;
-        }
-
-        Ok(offset)
     }
 }

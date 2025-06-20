@@ -1,37 +1,40 @@
-use super::{midi_command_iterator::MidiCommandIterator, midi_packet_header_zero_alloc::MidiPacketHeaderZeroAlloc};
+use zerocopy::{
+    FromBytes,
+    network_endian::{U16, U32},
+};
+
+use super::midi_command_iterator::MidiCommandIterator;
+use crate::packets::midi_packets::midi_packet_header::MidiPacketHeader;
 
 #[derive(Debug)]
 pub(crate) struct MidiPacketZeroAlloc<'a> {
-    header: MidiPacketHeaderZeroAlloc<'a>,
+    header: &'a MidiPacketHeader,
     data: &'a [u8],
 }
 
 impl<'a> MidiPacketZeroAlloc<'a> {
     pub fn new(data: &'a [u8]) -> std::io::Result<Self> {
-        let header = MidiPacketHeaderZeroAlloc::new(
-            data.get(..MidiPacketHeaderZeroAlloc::size())
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid MIDI packet header length"))?
-                .try_into()
-                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid MIDI packet header length"))?,
-        );
-        Ok(Self { header, data })
+        let (header, body) = MidiPacketHeader::ref_from_prefix(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Failed to parse MIDI packet header: {}", e)))?;
+
+        Ok(Self { header, data: body })
     }
 
     pub fn commands(&self) -> MidiCommandIterator<'a> {
-        MidiCommandIterator::new(&self.data[MidiPacketHeaderZeroAlloc::size()..])
+        MidiCommandIterator::new(self.data)
     }
 
-    pub fn sequence_number(&self) -> u16 {
-        self.header.sequence_number()
-    }
-
-    #[allow(dead_code)]
-    pub fn timestamp(&self) -> u32 {
-        self.header.timestamp()
+    pub fn sequence_number(&self) -> U16 {
+        self.header.sequence_number
     }
 
     #[allow(dead_code)]
-    pub fn ssrc(&self) -> u32 {
-        self.header.ssrc()
+    pub fn timestamp(&self) -> U32 {
+        self.header.timestamp
+    }
+
+    #[allow(dead_code)]
+    pub fn ssrc(&self) -> U32 {
+        self.header.ssrc
     }
 }

@@ -1,17 +1,19 @@
-use byteorder::WriteBytesExt;
-use std::io::Write;
+use bytes::{BufMut, BytesMut};
+
+use crate::packets::midi_packets::util::StatusBit;
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
+#[repr(u8)]
 pub enum MidiCommand<'a> {
-    NoteOff { channel: u8, key: u8, velocity: u8 },
-    NoteOn { channel: u8, key: u8, velocity: u8 },
-    PolyphonicKeyPressure { channel: u8, key: u8, pressure: u8 },
-    ControlChange { channel: u8, controller: u8, value: u8 },
-    ProgramChange { channel: u8, program: u8 },
-    ChannelPressure { channel: u8, pressure: u8 },
-    PitchBend { channel: u8, lsb: u8, msb: u8 },
-    SysEx { data: &'a [u8] }, // System Exclusive message
+    NoteOn { channel: u8, key: u8, velocity: u8 } = 0x90,
+    NoteOff { channel: u8, key: u8, velocity: u8 } = 0x80,
+    PolyphonicKeyPressure { channel: u8, key: u8, pressure: u8 } = 0xA0,
+    ControlChange { channel: u8, controller: u8, value: u8 } = 0xB0,
+    ProgramChange { channel: u8, program: u8 } = 0xC0,
+    ChannelPressure { channel: u8, pressure: u8 } = 0xD0,
+    PitchBend { channel: u8, lsb: u8, msb: u8 } = 0xE0,
+    SysEx { data: &'a [u8] } = 0xF0, // System Exclusive message
 }
 
 impl MidiCommand<'_> {
@@ -85,52 +87,94 @@ impl MidiCommand<'_> {
         }
     }
 
-    pub(super) fn write<W: Write>(&self, writer: &mut W, running_status: Option<u8>) -> Result<usize, std::io::Error> {
-        let mut bytes_written = 0;
+    pub(super) fn write(&self, writer: &mut BytesMut, running_status: Option<u8>) {
         if running_status.is_none() || self.status() != running_status.unwrap() {
-            writer.write_u8(self.status())?;
-            bytes_written += 1;
+            writer.put_u8(self.status());
         }
 
         match self {
             MidiCommand::SysEx { data } => {
-                writer.write_u8(0xF0)?;
-                bytes_written += 1;
-                writer.write_all(data)?;
-                bytes_written += data.len();
-                writer.write_u8(0xF7)?;
-                bytes_written += 1;
+                writer.put_u8(0xF0);
+                writer.put_slice(data);
+                writer.put_u8(0xF7);
             }
             MidiCommand::NoteOff { key, velocity, .. } | MidiCommand::NoteOn { key, velocity, .. } => {
-                writer.write_u8(*key)?;
-                writer.write_u8(*velocity)?;
-                bytes_written += 2;
+                writer.put_u8(*key);
+                writer.put_u8(*velocity);
             }
             MidiCommand::PolyphonicKeyPressure { key, pressure, .. } => {
-                writer.write_u8(*key)?;
-                writer.write_u8(*pressure)?;
-                bytes_written += 2;
+                writer.put_u8(*key);
+                writer.put_u8(*pressure);
             }
             MidiCommand::ControlChange { controller, value, .. } => {
-                writer.write_u8(*controller)?;
-                writer.write_u8(*value)?;
-                bytes_written += 2;
+                writer.put_u8(*controller);
+                writer.put_u8(*value);
             }
             MidiCommand::ProgramChange { program, .. } => {
-                writer.write_u8(*program)?;
-                bytes_written += 1;
+                writer.put_u8(*program);
             }
             MidiCommand::ChannelPressure { pressure, .. } => {
-                writer.write_u8(*pressure)?;
-                bytes_written += 1;
+                writer.put_u8(*pressure);
             }
             MidiCommand::PitchBend { lsb, msb, .. } => {
-                writer.write_u8(*lsb)?;
-                writer.write_u8(*msb)?;
-                bytes_written += 2;
+                writer.put_u8(*lsb);
+                writer.put_u8(*msb);
             }
         }
-        Ok(bytes_written)
+    }
+
+    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (MidiCommand<'_>, &[u8]) {
+        let command = match status_byte {
+            0x80 => MidiCommand::NoteOff {
+                channel,
+                key: bytes[0],
+                velocity: bytes[1],
+            },
+            0x90 => MidiCommand::NoteOn {
+                channel,
+                key: bytes[0],
+                velocity: bytes[1],
+            },
+            0xA0 => MidiCommand::PolyphonicKeyPressure {
+                channel,
+                key: bytes[0],
+                pressure: bytes[1],
+            },
+            0xB0 => MidiCommand::ControlChange {
+                channel,
+                controller: bytes[0],
+                value: bytes[1],
+            },
+            0xC0 => MidiCommand::ProgramChange { channel, program: bytes[0] },
+            0xD0 => MidiCommand::ChannelPressure { channel, pressure: bytes[0] },
+            0xE0 => MidiCommand::PitchBend {
+                channel,
+                lsb: bytes[0],
+                msb: bytes[1],
+            },
+
+            0xF0 => {
+                todo!("Handle SysEx command");
+            }
+            _ => panic!("Unknown MIDI command type"),
+        };
+
+        let remaining = &bytes[command.size()..];
+        (command, remaining)
+    }
+
+    pub(crate) fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(MidiCommand, &[u8])> {
+        let (status_byte, bytes) = if bytes[0].status_bit() {
+            (bytes[0], &bytes[1..])
+        } else {
+            (
+                running_status.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Running status not set"))?,
+                bytes,
+            )
+        };
+        let channel = status_byte & 0x0F;
+        let command_type = status_byte & 0xF0;
+        Ok(MidiCommand::from_status_byte(command_type, channel, bytes))
     }
 }
 
@@ -164,16 +208,16 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        let mut bytes = Vec::new();
-        let bytes_written = command.write(&mut bytes, None).unwrap();
-        assert_eq!(bytes_written, 3);
+        let mut bytes = BytesMut::new();
+        command.write(&mut bytes, None);
+        assert_eq!(bytes.len(), 3);
         assert_eq!(bytes[..3], [0x94, 0x40, 0x7F]);
     }
 
     fn test_command_write_type(command: MidiCommand, expected_bytes: &[u8]) {
-        let mut bytes = Vec::new();
-        let bytes_written = command.write(&mut bytes, None).unwrap();
-        assert_eq!(bytes_written, expected_bytes.len());
+        let mut bytes = BytesMut::new();
+        command.write(&mut bytes, None);
+        assert_eq!(bytes.len(), expected_bytes.len());
         assert_eq!(bytes, expected_bytes);
     }
 
@@ -253,9 +297,8 @@ mod tests {
             key: 0x40,
             velocity: 0x7F,
         };
-        let mut bytes = Vec::new();
-        let result = command.write(&mut bytes, None);
-        assert!(result.is_ok());
-        assert_eq!(bytes, vec![0x94u8, 0x40, 0x7F]);
+        let mut bytes = BytesMut::new();
+        command.write(&mut bytes, None);
+        assert_eq!(&bytes[..], &[0x94u8, 0x40, 0x7F]);
     }
 }

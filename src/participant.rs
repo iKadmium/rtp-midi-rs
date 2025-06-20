@@ -1,21 +1,27 @@
-use std::{net::SocketAddr, time::Instant};
+use std::{
+    ffi::{CStr, CString},
+    net::SocketAddr,
+    time::Instant,
+};
+
+use zerocopy::network_endian::U32;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Participant {
     ctrl_addr: SocketAddr,
-    initiator_token: Option<u32>,
+    initiator_token: Option<U32>,
     last_clock_sync: Instant,
-    name: String,
+    name: CString,
     invited_by_us: bool,
-    ssrc: u32,
+    ssrc: U32,
 }
 
 impl Participant {
-    pub fn new(ctrl_addr: SocketAddr, invited_by_us: bool, initiator_token: Option<u32>, name: String, ssrc: u32) -> Self {
+    pub fn new(ctrl_addr: SocketAddr, invited_by_us: bool, initiator_token: Option<U32>, name: &CStr, ssrc: U32) -> Self {
         Participant {
             ctrl_addr,
             initiator_token,
-            name,
+            name: name.to_owned(),
             last_clock_sync: Instant::now(),
             invited_by_us,
             ssrc,
@@ -38,11 +44,11 @@ impl Participant {
         self.invited_by_us
     }
 
-    pub(super) fn initiator_token(&self) -> Option<u32> {
+    pub(super) fn initiator_token(&self) -> Option<U32> {
         self.initiator_token
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &CStr {
         &self.name
     }
 
@@ -50,7 +56,7 @@ impl Participant {
         self.ctrl_addr
     }
 
-    pub fn ssrc(&self) -> u32 {
+    pub fn ssrc(&self) -> U32 {
         self.ssrc
     }
 }
