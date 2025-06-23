@@ -3,6 +3,7 @@ use super::rtp_midi_session::RtpMidiSession;
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
+use crate::participant::Participant;
 use crate::sessions::rtp_midi_session::PendingInvitation;
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -34,11 +35,16 @@ impl RtpPort for ControlPort {
     fn socket(&self) -> &Arc<UdpSocket> {
         &self.socket
     }
+
+    fn participant_addr(participant: &Participant) -> SocketAddr {
+        participant.addr()
+    }
 }
 
 impl ControlPort {
     pub async fn bind(port: u16, name: CString, ssrc: U32) -> std::io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, port)).await?);
+
         Ok(ControlPort {
             session_name: name,
             ssrc,

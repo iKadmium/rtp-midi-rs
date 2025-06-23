@@ -13,7 +13,7 @@ impl HostSyncer {
         let lock = ctx.participants.lock().await;
 
         if lock.is_empty() {
-            event!(Level::DEBUG, "No participants to sync with");
+            event!(Level::DEBUG, "No participants to clean up");
             return;
         }
 

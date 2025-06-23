@@ -23,15 +23,16 @@ impl<'a> MidiPacket<'a> {
         Ok(Self { header, body })
     }
 
-    pub(crate) fn new_as_bytes(sequence_number: U16, timestamp: U32, ssrc: U32, commands: &'a [MidiEvent]) -> Bytes {
-        let header = MidiPacketHeader::new(sequence_number, timestamp, ssrc);
-        let command_list_body = MidiCommandListBody::new_as_bytes(commands, false);
-        let command_list_header = MidiCommandListHeader::build_for(&command_list_body);
+    pub(crate) fn new_as_bytes(sequence_number: U16, timestamp: U32, ssrc: U32, commands: &'a [MidiEvent], z_flag: bool) -> Bytes {
+        let packet_header = MidiPacketHeader::new(sequence_number, timestamp, ssrc);
+        let command_list_body = MidiCommandListBody::new(commands);
+        let command_list_header = MidiCommandListHeader::build_for(&command_list_body, z_flag);
 
-        let mut buffer = BytesMut::with_capacity(std::mem::size_of::<MidiPacketHeader>() + command_list_body.len());
-        buffer.put_slice(header.as_bytes());
+        // Get the size of the body from the header as it's already calculated
+        let mut buffer = BytesMut::with_capacity(std::mem::size_of::<MidiPacketHeader>() + command_list_header.size() + command_list_header.length());
+        buffer.put_slice(packet_header.as_bytes());
         command_list_header.write(&mut buffer);
-        buffer.put_slice(command_list_body.as_bytes());
+        command_list_body.write(&mut buffer, z_flag);
         buffer.freeze()
     }
 

@@ -35,7 +35,7 @@ mod tests {
                 velocity: 127,
             },
         )];
-        let packet = MidiPacket::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands);
+        let packet = MidiPacket::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands, false);
 
         let parsed_packet = RtpMidiPacket::parse(&packet).unwrap();
         if let RtpMidiPacket::Midi(parsed_midi_packet) = parsed_packet {

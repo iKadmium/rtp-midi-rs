@@ -14,7 +14,7 @@ async fn test_stop_cleanup() {
         .await
         .expect("Failed to start RTP MIDI session");
 
-    session.stop();
+    session.stop_immediately();
 
     drop(session);
 

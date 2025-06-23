@@ -33,6 +33,10 @@ impl RtpPort for MidiPort {
     fn socket(&self) -> &Arc<UdpSocket> {
         &self.socket
     }
+
+    fn participant_addr(participant: &Participant) -> SocketAddr {
+        participant.midi_port_addr()
+    }
 }
 
 pub(super) struct MidiPort {
@@ -46,6 +50,7 @@ pub(super) struct MidiPort {
 impl MidiPort {
     pub async fn bind(port: u16, name: CString, ssrc: U32) -> std::io::Result<Self> {
         let socket = Arc::new(UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, port)).await?);
+
         Ok(MidiPort {
             ssrc,
             start_time: Instant::now(),
@@ -78,16 +83,12 @@ impl MidiPort {
         match packet {
             RtpMidiPacket::Control(ref control_packet) => match control_packet {
                 ControlPacket::Invitation { body, name } => {
-                    event!(Level::INFO, "Received session invitation");
-                    let ctrl_addr = SocketAddr::new(src.ip(), src.port() - 1);
-                    ctx.participants.lock().await.insert(
-                        body.sender_ssrc,
-                        Participant::new(ctrl_addr, false, Some(body.initiator_token), name, body.sender_ssrc),
-                    );
-                    self.send_invitation_acceptance(body.initiator_token, src).await;
+                    event!(Level::INFO, name = name.to_str().unwrap_or("Unknown"), "Received session invitation");
+                    self.handle_invitation(body, name, src, ctx).await;
                 }
-                ControlPacket::Acceptance { body, name: _ } => {
-                    self.handle_acknowledgment(body, ctx).await;
+                ControlPacket::Acceptance { body, name } => {
+                    event!(Level::INFO, name = name.to_str().unwrap_or("Unknown"), "Received session acceptance");
+                    self.handle_acceptance(body, ctx).await;
                 }
                 ControlPacket::ClockSync(clock_sync_packet) => {
                     event!(Level::DEBUG, "Received clock sync from {}", src);
@@ -110,9 +111,37 @@ impl MidiPort {
         }
     }
 
+    #[instrument(skip_all, fields(sender = %sender_name.to_str().unwrap_or("Unknown"), token = %body.initiator_token, src = %src))]
+    async fn handle_invitation(&self, body: &SessionInitiationPacketBody, sender_name: &CStr, src: SocketAddr, ctx: &RtpMidiSession) {
+        let invitation = ctx.pending_invitations.lock().await.remove(&body.sender_ssrc);
+        match invitation {
+            None => {
+                event!(Level::WARN, "Received unexpected MIDI port invitation for SSRC {}", body.sender_ssrc.get());
+            }
+            Some(inv) => {
+                event!(Level::DEBUG, "Found pending invitation for SSRC {}", body.sender_ssrc.get());
+                if inv.token != body.initiator_token {
+                    event!(
+                        Level::WARN,
+                        expected = inv.token.get(),
+                        received = body.initiator_token.get(),
+                        "Token mismatch in invitation"
+                    );
+                    return;
+                } else {
+                    let ctrl_addr = SocketAddr::new(src.ip(), src.port() - 1);
+                    ctx.participants.lock().await.insert(
+                        body.sender_ssrc,
+                        Participant::new(ctrl_addr, false, Some(body.initiator_token), sender_name, body.sender_ssrc),
+                    );
+                    self.send_invitation_acceptance(body.initiator_token, src).await;
+                }
+            }
+        }
+    }
+
     #[instrument(skip_all, fields(token = %ack_body.initiator_token))]
-    async fn handle_acknowledgment(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession) {
-        event!(Level::INFO, "Received session acknowledgment");
+    async fn handle_acceptance(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession) {
         let mut locked_pending_invitations = ctx.pending_invitations.lock().await;
 
         let inv = locked_pending_invitations.get(&ack_body.sender_ssrc).cloned();
@@ -120,19 +149,19 @@ impl MidiPort {
             event!(
                 Level::WARN,
                 ssrc = ack_body.sender_ssrc.get(),
-                "Received Acknowledgment but no pending invitation found for this SSRC."
+                "Received Acceptance but no pending invitation found for this SSRC."
             );
             return;
         }
 
         let inv = inv.unwrap();
         if inv.token != ack_body.initiator_token {
-            event!(Level::WARN, expected = inv.token.get(), "Received Acknowledgment with mismatched token",);
+            event!(Level::WARN, expected = inv.token.get(), "Received Acceptance with mismatched token",);
         }
 
         locked_pending_invitations.remove(&ack_body.sender_ssrc);
         drop(locked_pending_invitations);
-        event!(Level::DEBUG, "Matched Acknowledgment  for MIDI port invitation. Sending Clock Sync.");
+        event!(Level::DEBUG, "Matched Acceptance for MIDI port invitation. Sending Clock Sync.");
         let ctrl_addr = SocketAddr::new(inv.addr.ip(), inv.addr.port() - 1);
         let participant = Participant::new(ctrl_addr, true, Some(inv.token), &inv.name, ack_body.sender_ssrc);
         ctx.participants.lock().await.insert(ack_body.sender_ssrc, participant.clone());
@@ -202,7 +231,7 @@ impl MidiPort {
         let lock = ctx.participants.lock().await;
         let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
-        let packet = MidiPacket::new_as_bytes(U16::new(*seq), current_timestamp_u32(self.start_time), self.ssrc, commands);
+        let packet = MidiPacket::new_as_bytes(U16::new(*seq), current_timestamp_u32(self.start_time), self.ssrc, commands, false);
         *seq = seq.wrapping_add(1);
         event!(Level::DEBUG, "Sending MIDI packet batch");
         for participant in participants {

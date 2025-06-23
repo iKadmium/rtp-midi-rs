@@ -19,7 +19,7 @@ pub enum MidiCommand<'a> {
 impl MidiCommand<'_> {
     pub(crate) fn size(&self) -> usize {
         match self {
-            MidiCommand::SysEx { data } => data.len() + 2,
+            MidiCommand::SysEx { data } => data.len() + 1,
             MidiCommand::NoteOff { .. } => 2,
             MidiCommand::NoteOn { .. } => 2,
             MidiCommand::PolyphonicKeyPressure { .. } => 2,

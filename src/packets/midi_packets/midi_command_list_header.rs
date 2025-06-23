@@ -1,5 +1,7 @@
 use bytes::{BufMut, BytesMut};
 
+use crate::packets::midi_packets::midi_command_list_body::MidiCommandListBody;
+
 #[derive(Debug)]
 pub struct MidiCommandListHeader {
     flags: MidiCommandListFlags,
@@ -67,10 +69,10 @@ impl MidiCommandListHeader {
         MidiCommandListHeader { flags, length }
     }
 
-    pub fn build_for(events: &[u8]) -> Self {
-        let length = events.len();
+    pub fn build_for(events: &MidiCommandListBody, z_flag: bool) -> Self {
+        let length = events.size(z_flag);
         let b_flag = MidiCommandListFlags::needs_b_flag(length);
-        let flags = MidiCommandListFlags::new(b_flag, false, false, false);
+        let flags = MidiCommandListFlags::new(b_flag, false, false, z_flag);
         Self::new(flags, length)
     }
 
@@ -82,8 +84,8 @@ impl MidiCommandListHeader {
         self.length
     }
 
-    pub fn size(b_flag: bool) -> usize {
-        if b_flag { 2 } else { 1 }
+    pub fn size(&self) -> usize {
+        if self.flags.b_flag() { 2 } else { 1 }
     }
 
     pub fn from_slice(data: &[u8]) -> Self {
@@ -103,11 +105,17 @@ impl MidiCommandListHeader {
     }
 
     pub fn write(&self, buffer: &mut BytesMut) {
-        let first_byte = self.flags.flags | (self.length as u8 & 0x0F);
-        buffer.put_u8(first_byte);
         if self.flags.b_flag() {
-            let length_lsb = (self.length & 0xFF) as u8;
-            buffer.put_u8(length_lsb);
+            // For large lengths: first byte has flags + upper 4 bits of length
+            let first_byte = self.flags.flags | ((self.length >> 8) as u8 & 0x0F);
+            buffer.put_u8(first_byte);
+            // Second byte has lower 8 bits of length
+            let second_byte = (self.length & 0xFF) as u8;
+            buffer.put_u8(second_byte);
+        } else {
+            // For small lengths: first byte has flags + length (4 bits max)
+            let first_byte = self.flags.flags | (self.length as u8 & 0x0F);
+            buffer.put_u8(first_byte);
         }
     }
 }

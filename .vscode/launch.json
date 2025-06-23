@@ -13,7 +13,8 @@
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "rtpmidi",
@@ -31,7 +32,8 @@
                 "args": [
                     "build",
                     "--example=invite_to_session",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "invite_to_session",
@@ -50,7 +52,8 @@
                     "test",
                     "--no-run",
                     "--example=invite_to_session",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "invite_to_session",
@@ -68,15 +71,23 @@
                 "args": [
                     "build",
                     "--example=log_messages",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "log_messages",
                     "kind": "example"
                 }
             },
+            "env": {
+                "RUST_LOG": "rtpmidi=trace"
+            },
+            "initCommands": [
+                "process handle SIGINT -n true -p true -s false"
+            ],
+            "terminal": "integrated",
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
         },
         {
             "type": "lldb",
@@ -87,7 +98,8 @@
                     "test",
                     "--no-run",
                     "--example=log_messages",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "log_messages",
@@ -106,8 +118,7 @@
                     "build",
                     "--example=send_midi",
                     "--package=rtpmidi",
-                    "--features",
-                    "examples"
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "send_midi",
@@ -126,7 +137,8 @@
                     "test",
                     "--no-run",
                     "--example=send_midi",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "send_midi",
@@ -145,7 +157,8 @@
                     "test",
                     "--no-run",
                     "--test=integration_test",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "integration_test",
@@ -164,7 +177,8 @@
                     "test",
                     "--no-run",
                     "--test=mod",
-                    "--package=rtpmidi"
+                    "--package=rtpmidi",
+                    "--features=examples"
                 ],
                 "filter": {
                     "name": "mod",

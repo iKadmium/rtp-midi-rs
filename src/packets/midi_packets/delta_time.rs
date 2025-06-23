@@ -42,7 +42,7 @@ pub fn read_delta_time(bytes: &[u8]) -> std::io::Result<(u32, &[u8])> {
     for (bytes_read, &byte) in bytes.iter().enumerate() {
         value |= ((byte & 0x7F) as u32) << shift;
         if byte & 0x80 == 0 {
-            return Ok((value, &bytes[bytes_read..]));
+            return Ok((value, &bytes[(bytes_read + 1)..]));
         }
         shift += 7;
     }
