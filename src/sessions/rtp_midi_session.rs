@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Level, event, instrument};
 use zerocopy::network_endian::{U32, U64};
 
-use super::MAX_UDP_PACKET_SIZE;
 use super::host_syncer::HostSyncer;
 use super::invite_responder::InviteResponder;
 #[cfg(feature = "mdns")]
@@ -18,8 +17,8 @@ use super::rtp_port::RtpPort;
 use crate::packets::midi_packets::midi_command::MidiCommand;
 use crate::packets::midi_packets::midi_event::MidiEvent;
 use crate::participant::Participant;
-use crate::sessions::control_port::ControlPort;
-use crate::sessions::midi_port::MidiPort;
+use crate::sessions::control_port::{ControlPort, MAX_CONTROL_PACKET_SIZE};
+use crate::sessions::midi_port::{MAX_MIDI_PACKET_SIZE, MidiPort};
 
 pub(super) type MidiPacketListener = dyn Fn(&MidiCommand) + Send + 'static;
 pub(super) type ListenerSet = HashMap<RtpMidiEventType, Box<MidiPacketListener>>;
@@ -87,7 +86,7 @@ impl RtpMidiSession {
         let control_cancel_token = Arc::clone(&self.cancel_token);
 
         tokio::spawn(async move {
-            let mut buf = [0u8; MAX_UDP_PACKET_SIZE];
+            let mut buf = [0u8; MAX_CONTROL_PACKET_SIZE];
             loop {
                 tokio::select! {
                     _ = control_cancel_token.cancelled() => {
@@ -106,7 +105,7 @@ impl RtpMidiSession {
         let midi_cancel_token = Arc::clone(&self.cancel_token);
 
         tokio::spawn(async move {
-            let mut buf = [0u8; MAX_UDP_PACKET_SIZE];
+            let mut buf = [0u8; MAX_MIDI_PACKET_SIZE];
             loop {
                 tokio::select! {
                     _ = midi_cancel_token.cancelled() => {

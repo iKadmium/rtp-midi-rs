@@ -1,4 +1,3 @@
-use super::MAX_UDP_PACKET_SIZE;
 use super::rtp_midi_session::{ListenerSet, RtpMidiSession, current_timestamp};
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
@@ -19,6 +18,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tracing::{Level, event, instrument};
 use zerocopy::network_endian::{U16, U32, U64};
+
+pub const MAX_MIDI_PACKET_SIZE: usize = 32768;
 
 impl RtpPort for MidiPort {
     fn session_name(&self) -> &CStr {
@@ -55,7 +56,7 @@ impl MidiPort {
     }
 
     #[instrument(name = "MIDI", skip_all, fields(name = %ctx.name(), src, src_name))]
-    pub async fn start(&self, ctx: &RtpMidiSession, listeners: Arc<Mutex<ListenerSet>>, buf: &mut [u8; MAX_UDP_PACKET_SIZE]) {
+    pub async fn start(&self, ctx: &RtpMidiSession, listeners: Arc<Mutex<ListenerSet>>, buf: &mut [u8; MAX_MIDI_PACKET_SIZE]) {
         let recv = self.socket.recv_from(buf).await;
         if recv.is_err() {
             event!(Level::ERROR, "Failed to receive data on MIDI port: {}", recv.unwrap_err());

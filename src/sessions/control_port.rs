@@ -1,4 +1,3 @@
-use super::MAX_UDP_PACKET_SIZE;
 use super::invite_responder::InviteResponder;
 use super::rtp_midi_session::RtpMidiSession;
 use super::rtp_port::RtpPort;
@@ -14,6 +13,8 @@ use tracing::Level;
 use tracing::event;
 use tracing::instrument;
 use zerocopy::network_endian::U32;
+
+pub const MAX_CONTROL_PACKET_SIZE: usize = 1024;
 
 pub(super) struct ControlPort {
     ssrc: U32,
@@ -66,7 +67,7 @@ impl ControlPort {
     }
 
     #[instrument(skip_all, name = "CTRL", fields(name = %self.session_name.to_string_lossy(), src))]
-    pub async fn start(&self, ctx: &RtpMidiSession, invite_handler: &InviteResponder, buf: &mut [u8; MAX_UDP_PACKET_SIZE]) {
+    pub async fn start(&self, ctx: &RtpMidiSession, invite_handler: &InviteResponder, buf: &mut [u8; MAX_CONTROL_PACKET_SIZE]) {
         let recv = self.socket.recv_from(buf).await;
 
         if let Err(e) = recv {
