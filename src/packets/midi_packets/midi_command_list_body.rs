@@ -1,16 +1,16 @@
 use bytes::BytesMut;
 
-use crate::packets::midi_packets::delta_time::delta_time_size;
+use crate::packets::midi_packets::{delta_time::delta_time_size, midi_message_ext::ReadWriteExt};
 
 use super::midi_event::MidiEvent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MidiCommandListBody<'a> {
-    commands: &'a [MidiEvent<'a>],
+    commands: &'a [MidiEvent],
 }
 
 impl<'a> MidiCommandListBody<'a> {
-    pub fn new(commands: &'a [MidiEvent<'a>]) -> Self {
+    pub fn new(commands: &'a [MidiEvent]) -> Self {
         Self { commands }
     }
 
@@ -32,9 +32,10 @@ impl<'a> MidiCommandListBody<'a> {
                 length += delta_time_size(command.delta_time())
             }
             if Some(command.command().status()) != running_status {
-                length += 1;
+                length += command.command().len();
+            } else {
+                length += command.command().len() - 1;
             }
-            length += command.command().size();
             running_status = Some(command.command().status());
         }
 

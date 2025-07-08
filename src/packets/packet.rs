@@ -18,23 +18,16 @@ impl<'a> RtpMidiPacket<'a> {
 
 #[cfg(test)]
 mod tests {
+    use midi_types::{Channel, MidiMessage, Note, Value7};
     use zerocopy::U16;
     use zerocopy::network_endian::U32;
 
     use super::*;
-    use crate::packets::midi_packets::midi_command::MidiCommand;
     use crate::packets::midi_packets::midi_event::MidiEvent;
 
     #[test]
     fn test_parse_midi_packet() {
-        let commands = vec![MidiEvent::new(
-            None,
-            MidiCommand::NoteOn {
-                channel: 1,
-                key: 64,
-                velocity: 127,
-            },
-        )];
+        let commands = vec![MidiEvent::new(None, MidiMessage::NoteOn(Channel::C1, Note::C4, Value7::from(127)))];
         let packet = MidiPacket::new_as_bytes(U16::new(1), U32::new(2), U32::new(3), &commands, false);
 
         let parsed_packet = RtpMidiPacket::parse(&packet).unwrap();
@@ -44,14 +37,7 @@ mod tests {
             assert_eq!(parsed_midi_packet.ssrc(), 3);
             let values = parsed_midi_packet.commands().collect::<Vec<_>>();
             assert_eq!(values.len(), 1);
-            assert_eq!(
-                values[0].command().to_owned(),
-                MidiCommand::NoteOn {
-                    channel: 1,
-                    key: 64,
-                    velocity: 127
-                }
-            );
+            assert_eq!(values[0].command().to_owned(), MidiMessage::NoteOn(Channel::C1, Note::C4, Value7::from(127)));
         } else {
             panic!("Expected MidiPacket");
         }

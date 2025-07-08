@@ -1,7 +1,7 @@
 mod common;
 
 use common::find_consecutive_ports;
-use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
+use midi_types::{Channel, MidiMessage, Note, Value7};
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use std::net::SocketAddr;
@@ -75,22 +75,14 @@ async fn test_two_session_inter_communication() {
     assert_eq!(session2_participants[0].addr(), addr1);
 
     // Send from session1 to session2
-    let note_on = MidiCommand::NoteOn {
-        channel: 1,
-        key: 60,
-        velocity: 100,
-    };
+    let note_on = MidiMessage::NoteOn(Channel::C1, Note::from(60), Value7::from(100));
     session1.send_midi(&note_on).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     let got = received_by_2.lock().await.clone();
     assert_eq!(got, Some(note_on.clone()));
 
     // Send from session2 to session1
-    let note_off = MidiCommand::NoteOff {
-        channel: 1,
-        key: 60,
-        velocity: 0,
-    };
+    let note_off = MidiMessage::NoteOff(Channel::C1, Note::from(60), Value7::from(0));
     session2.send_midi(&note_off).await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let got = received_by_1.lock().await.clone();

@@ -1,17 +1,19 @@
 use bytes::BytesMut;
+use midi_types::MidiMessage;
 
 use crate::packets::midi_packets::delta_time::read_delta_time;
 
-use super::{delta_time::WriteDeltaTimeExt, midi_command::MidiCommand};
+use super::delta_time::WriteDeltaTimeExt;
+use super::midi_message_ext::ReadWriteExt;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MidiEvent<'a> {
+pub struct MidiEvent {
     delta_time: Option<u32>,
-    command: MidiCommand<'a>,
+    command: MidiMessage,
 }
 
-impl<'a> MidiEvent<'a> {
-    pub fn new(delta_time: Option<u32>, command: MidiCommand<'a>) -> Self {
+impl MidiEvent {
+    pub fn new(delta_time: Option<u32>, command: MidiMessage) -> Self {
         MidiEvent { delta_time, command }
     }
 
@@ -19,11 +21,11 @@ impl<'a> MidiEvent<'a> {
         self.delta_time.unwrap_or(0)
     }
 
-    pub fn command(&self) -> &MidiCommand {
+    pub fn command(&self) -> &MidiMessage {
         &self.command
     }
 
-    pub fn from_be_bytes(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
+    pub fn from_be_bytes<'a>(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
         let mut delta_time = None;
 
         let mut bytes = bytes;
@@ -33,8 +35,7 @@ impl<'a> MidiEvent<'a> {
             bytes = new_bytes;
         }
 
-        let (command, offset) = MidiCommand::from_be_bytes(bytes, running_status)?;
-
+        let (command, offset) = MidiMessage::from_be_bytes(bytes, running_status)?;
         Ok((MidiEvent { delta_time, command }, offset))
     }
 
@@ -52,16 +53,14 @@ impl<'a> MidiEvent<'a> {
 
 #[cfg(test)]
 mod tests {
+    use midi_types::{Channel, Note, Value7};
+
     use super::*;
 
     #[test]
     fn test_timed_command() {
         let delta_time = 0x123456;
-        let command = MidiCommand::NoteOn {
-            channel: 7,
-            key: 0x40,
-            velocity: 0x7F,
-        };
+        let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         let timed_command = MidiEvent {
             delta_time: Some(delta_time),
             command: command.clone(),
@@ -77,11 +76,7 @@ mod tests {
 
         let delta_time = 0x123456;
         expected_bytes.write_delta_time(delta_time);
-        let command = MidiCommand::NoteOn {
-            channel: 7,
-            key: 0x40,
-            velocity: 0x7F,
-        };
+        let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
         let timed_command = MidiEvent {
@@ -99,11 +94,7 @@ mod tests {
     fn test_timed_command_write_without_delta_time() {
         let mut expected_bytes = BytesMut::with_capacity(10);
 
-        let command = MidiCommand::NoteOn {
-            channel: 7,
-            key: 0x40,
-            velocity: 0x7F,
-        };
+        let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
         let timed_command = MidiEvent {
@@ -124,11 +115,7 @@ mod tests {
         let delta_time = 0;
         expected_bytes.write_delta_time(delta_time);
 
-        let command = MidiCommand::NoteOn {
-            channel: 7,
-            key: 0x40,
-            velocity: 0x7F,
-        };
+        let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
         let timed_command = MidiEvent {

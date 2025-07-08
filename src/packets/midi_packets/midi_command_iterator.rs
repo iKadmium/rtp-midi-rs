@@ -1,4 +1,4 @@
-use crate::packets::midi_packets::midi_event::MidiEvent;
+use crate::packets::midi_packets::{midi_event::MidiEvent, midi_message_ext::ReadWriteExt};
 
 use super::midi_command_list_header::MidiCommandListHeader;
 
@@ -25,7 +25,7 @@ impl<'a> MidiCommandIterator<'a> {
 }
 
 impl<'a> Iterator for MidiCommandIterator<'a> {
-    type Item = MidiEvent<'a>;
+    type Item = MidiEvent;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.data.is_empty() {
@@ -46,7 +46,7 @@ impl<'a> Iterator for MidiCommandIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::packets::midi_packets::midi_command::MidiCommand;
+    use midi_types::{Channel, MidiMessage, Note};
 
     use super::*;
 
@@ -59,18 +59,18 @@ mod tests {
         assert_eq!(events[0].delta_time(), 0);
         assert_eq!(events[1].delta_time(), 11);
 
-        let MidiCommand::NoteOn { channel, key, velocity } = events[0].command() else {
+        let MidiMessage::NoteOn(channel, key, velocity) = events[0].command() else {
             panic!("Unexpected MIDI command")
         };
-        assert_eq!(*channel, 1);
-        assert_eq!(*key, 65);
-        assert_eq!(*velocity, 0);
+        assert_eq!(*channel, Channel::from(1));
+        assert_eq!(*key, Note::from(65));
+        assert_eq!(*velocity, Into::into(0));
 
-        let MidiCommand::NoteOn { channel, key, velocity } = events[1].command() else {
+        let MidiMessage::NoteOn(channel, key, velocity) = events[1].command() else {
             panic!("Unexpected MIDI command")
         };
-        assert_eq!(*channel, 1);
-        assert_eq!(*key, 62);
-        assert_eq!(*velocity, 0);
+        assert_eq!(*channel, Channel::from(1));
+        assert_eq!(*key, Note::from(62));
+        assert_eq!(*velocity, Into::into(0));
     }
 }

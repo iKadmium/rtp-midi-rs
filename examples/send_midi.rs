@@ -1,7 +1,6 @@
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use rtpmidi::packets::midi_packets::midi_command::MidiCommand;
     use rtpmidi::sessions::{
         invite_responder::InviteResponder,
         rtp_midi_session::{RtpMidiEventType, RtpMidiSession},
@@ -22,12 +21,16 @@ async fn main() {
         .add_listener(RtpMidiEventType::MidiPacket, move |command| {
             // Filter for NoteOn commands
 
-            if let MidiCommand::NoteOn { channel, key, velocity } = command {
-                let response = MidiCommand::NoteOn {
-                    channel: *channel,
-                    key: *key - 12, // Down 1 octave
-                    velocity: *velocity,
-                };
+            use midi_types::MidiMessage;
+
+            if let MidiMessage::NoteOn(channel, key, velocity) = command {
+                use midi_types::Note;
+
+                let response = MidiMessage::NoteOn(
+                    *channel,
+                    Note::from(u8::from(*key) - 12), // Down 1 octave
+                    *velocity,
+                );
 
                 let session_clone = session_clone.clone();
                 tokio::spawn(async move {
