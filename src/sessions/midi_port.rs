@@ -242,7 +242,7 @@ impl MidiPort {
 
     #[instrument(skip_all, fields(name = %ctx.name()))]
     pub async fn send_midi<'a>(&self, ctx: &RtpMidiSession, command: &'a MidiMessage) -> std::io::Result<()> {
-        let batch: [MidiEvent; 1] = [MidiEvent::new(None, command.clone())];
+        let batch: [MidiEvent; 1] = [MidiEvent::new(None, *command)];
         self.send_midi_batch(ctx, &batch).await
     }
 

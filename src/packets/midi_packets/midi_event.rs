@@ -25,7 +25,7 @@ impl MidiEvent {
         &self.command
     }
 
-    pub fn from_be_bytes<'a>(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
+    pub fn from_be_bytes(bytes: &[u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &[u8])> {
         let mut delta_time = None;
 
         let mut bytes = bytes;
@@ -63,7 +63,7 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         let timed_command = MidiEvent {
             delta_time: Some(delta_time),
-            command: command.clone(),
+            command,
         };
 
         assert_eq!(timed_command.delta_time(), delta_time);
@@ -81,7 +81,7 @@ mod tests {
 
         let timed_command = MidiEvent {
             delta_time: Some(delta_time),
-            command: command.clone(),
+            command,
         };
 
         let mut bytes = BytesMut::with_capacity(10);
@@ -97,10 +97,7 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
-        let timed_command = MidiEvent {
-            delta_time: None,
-            command: command.clone(),
-        };
+        let timed_command = MidiEvent { delta_time: None, command };
 
         let mut bytes = BytesMut::with_capacity(10);
         timed_command.write(&mut bytes, None, false);
@@ -118,10 +115,7 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
-        let timed_command = MidiEvent {
-            delta_time: None,
-            command: command.clone(),
-        };
+        let timed_command = MidiEvent { delta_time: None, command };
 
         let mut bytes = BytesMut::with_capacity(10);
         timed_command.write(&mut bytes, None, true);

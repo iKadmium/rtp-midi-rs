@@ -78,13 +78,13 @@ async fn test_two_session_inter_communication() {
     let note_on = MidiMessage::NoteOn(Channel::C1, Note::from(60), Value7::from(100));
     session1.send_midi(&note_on).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let got = received_by_2.lock().await.clone();
-    assert_eq!(got, Some(note_on.clone()));
+    let got = *received_by_2.lock().await;
+    assert_eq!(got, Some(note_on));
 
     // Send from session2 to session1
     let note_off = MidiMessage::NoteOff(Channel::C1, Note::from(60), Value7::from(0));
     session2.send_midi(&note_off).await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let got = received_by_1.lock().await.clone();
-    assert_eq!(got, Some(note_off.clone()));
+    let got = *received_by_1.lock().await;
+    assert_eq!(got, Some(note_off));
 }
