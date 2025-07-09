@@ -5,6 +5,7 @@ use crate::packets::control_packets::control_packet::ControlPacket;
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
 use crate::packets::midi_packets::midi_event::MidiEvent;
 use crate::packets::midi_packets::midi_packet::MidiPacket;
+use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
 use crate::sessions::rtp_midi_session::{RtpMidiEventType, current_timestamp_u32};
@@ -104,7 +105,7 @@ impl MidiPort {
                 *seq = midi_packet.sequence_number().get().wrapping_add(1);
                 if let Some(callback) = listeners.lock().await.get(&RtpMidiEventType::MidiPacket) {
                     for command in midi_packet.commands() {
-                        callback(&command.command().to_owned());
+                        callback(&command.command());
                     }
                 }
             }
@@ -227,7 +228,7 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(name = %ctx.name(), participants))]
-    pub async fn send_midi_batch<'a>(&self, ctx: &RtpMidiSession, commands: &'a [MidiEvent]) -> std::io::Result<()> {
+    pub async fn send_midi_batch<'a>(&self, ctx: &RtpMidiSession, commands: &'a [MidiEvent<'a>]) -> std::io::Result<()> {
         let lock = ctx.participants.lock().await;
         let participants: Vec<Participant> = lock.values().cloned().collect();
         let mut seq = self.sequence_number.lock().await;
@@ -241,8 +242,8 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(name = %ctx.name()))]
-    pub async fn send_midi<'a>(&self, ctx: &RtpMidiSession, command: &'a MidiMessage) -> std::io::Result<()> {
-        let batch: [MidiEvent; 1] = [MidiEvent::new(None, *command)];
+    pub async fn send_midi<'a>(&self, ctx: &RtpMidiSession, command: &'a RtpMidiMessage<'a>) -> std::io::Result<()> {
+        let batch: [MidiEvent; 1] = [MidiEvent::new(None, command.to_owned())];
         self.send_midi_batch(ctx, &batch).await
     }
 

@@ -1,13 +1,16 @@
 use bytes::{BufMut, BytesMut};
-use midi_types::{Channel, Control, MidiMessage, Note, Program, Value7, Value14, status};
+use midi_types::{
+    Channel, Control, MidiMessage, Note, Program, Value7, Value14,
+    status::{self},
+};
 
-use crate::packets::midi_packets::util::StatusBit;
+use crate::packets::midi_packets::{rtp_midi_message::RtpMidiMessage, util::StatusBit};
 
 pub(super) trait ReadWriteExt {
     fn write(&self, writer: &mut BytesMut, running_status: Option<u8>);
     fn status(&self) -> u8;
-    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (MidiMessage, &[u8]);
-    fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(MidiMessage, &[u8])>;
+    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (RtpMidiMessage, &[u8]);
+    fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(RtpMidiMessage, &[u8])>;
 }
 
 impl ReadWriteExt for MidiMessage {
@@ -65,26 +68,31 @@ impl ReadWriteExt for MidiMessage {
         }
     }
 
-    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (MidiMessage, &[u8]) {
+    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (RtpMidiMessage, &[u8]) {
         let command = match status_byte {
-            0x80 => MidiMessage::NoteOff(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1])),
-            0x90 => MidiMessage::NoteOn(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1])),
-            0xA0 => MidiMessage::KeyPressure(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1])),
-            0xB0 => MidiMessage::ControlChange(Channel::from(channel), Control::from(bytes[0]), Value7::from(bytes[1])),
-            0xC0 => MidiMessage::ProgramChange(Channel::from(channel), Program::from(bytes[0])),
-            0xD0 => MidiMessage::ChannelPressure(Channel::from(channel), Value7::from(bytes[0])),
-            0xE0 => MidiMessage::PitchBendChange(Channel::from(channel), Value14::from((bytes[0], bytes[1]))),
+            0x80..0x90 => RtpMidiMessage::MidiMessage(MidiMessage::NoteOff(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1]))),
+            0x90..0xA0 => RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1]))),
+            0xA0..0xB0 => RtpMidiMessage::MidiMessage(MidiMessage::KeyPressure(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1]))),
+            0xB0..0xC0 => RtpMidiMessage::MidiMessage(MidiMessage::ControlChange(
+                Channel::from(channel),
+                Control::from(bytes[0]),
+                Value7::from(bytes[1]),
+            )),
+            0xC0..0xD0 => RtpMidiMessage::MidiMessage(MidiMessage::ProgramChange(Channel::from(channel), Program::from(bytes[0]))),
+            0xD0..0xE0 => RtpMidiMessage::MidiMessage(MidiMessage::ChannelPressure(Channel::from(channel), Value7::from(bytes[0]))),
+            0xE0..0xF0 => RtpMidiMessage::MidiMessage(MidiMessage::PitchBendChange(Channel::from(channel), Value14::from((bytes[0], bytes[1])))),
             0xF0 => {
-                todo!("Handle SysEx command");
+                let end_index = bytes.iter().position(|&b| b == 0xF7).unwrap_or(bytes.len());
+                RtpMidiMessage::SysEx(&bytes[1..end_index])
             }
-            _ => panic!("Unknown MIDI command type"),
+            _ => unreachable!("Unsupported MIDI command type: {}", status_byte),
         };
 
         let remaining = &bytes[command.len() - 1..];
         (command, remaining)
     }
 
-    fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(MidiMessage, &[u8])> {
+    fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(RtpMidiMessage, &[u8])> {
         let (status_byte, bytes) = if bytes[0].status_bit() {
             (bytes[0], &bytes[1..])
         } else {
@@ -94,8 +102,7 @@ impl ReadWriteExt for MidiMessage {
             )
         };
         let channel = status_byte & 0x0F;
-        let command_type = status_byte & 0xF0;
-        Ok(Self::from_status_byte(command_type, channel, bytes))
+        Ok(Self::from_status_byte(status_byte, channel, bytes))
     }
 }
 

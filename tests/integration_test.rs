@@ -2,6 +2,7 @@ mod common;
 
 use common::find_consecutive_ports;
 use midi_types::{Channel, MidiMessage, Note, Value7};
+use rtpmidi::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use std::net::SocketAddr;
@@ -33,25 +34,28 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_1 = received_by_1.clone();
         session1
-            .add_listener(RtpMidiEventType::MidiPacket, move |command| {
-                let command_owned = command.to_owned();
+            .add_listener(RtpMidiEventType::MidiPacket, {
                 let received_by_1 = received_by_1.clone();
-                tokio::spawn(async move {
-                    *received_by_1.lock().await = Some(command_owned);
-                });
+                move |message: &RtpMidiMessage| {
+                    if let RtpMidiMessage::MidiMessage(midi_message) = message {
+                        let received_by_1 = received_by_1.clone();
+                        received_by_1.blocking_lock().replace(*midi_message);
+                    }
+                }
             })
             .await;
     }
-    // Listener for session2
     {
         let received_by_2 = received_by_2.clone();
         session2
-            .add_listener(RtpMidiEventType::MidiPacket, move |command| {
-                let command_owned = command.to_owned();
+            .add_listener(RtpMidiEventType::MidiPacket, {
                 let received_by_2 = received_by_2.clone();
-                tokio::spawn(async move {
-                    *received_by_2.lock().await = Some(command_owned);
-                });
+                move |message: &RtpMidiMessage| {
+                    if let RtpMidiMessage::MidiMessage(midi_message) = message {
+                        let received_by_2 = received_by_2.clone();
+                        received_by_2.blocking_lock().replace(*midi_message);
+                    }
+                }
             })
             .await;
     }
@@ -76,15 +80,37 @@ async fn test_two_session_inter_communication() {
 
     // Send from session1 to session2
     let note_on = MidiMessage::NoteOn(Channel::C1, Note::from(60), Value7::from(100));
-    session1.send_midi(&note_on).await.unwrap();
+    session1.send_midi(&note_on.into()).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let got = *received_by_2.lock().await;
-    assert_eq!(got, Some(note_on));
+    let got = received_by_2.lock().await;
+    match got.as_ref() {
+        Some(MidiMessage::NoteOn(channel, note, velocity)) => {
+            if let MidiMessage::NoteOn(expected_channel, expected_note, expected_velocity) = note_on {
+                assert_eq!(channel, &expected_channel);
+                assert_eq!(note, &expected_note);
+                assert_eq!(velocity, &expected_velocity);
+            } else {
+                panic!("Expected a NoteOn message");
+            }
+        }
+        _ => panic!("Expected a NoteOn message"),
+    }
 
     // Send from session2 to session1
     let note_off = MidiMessage::NoteOff(Channel::C1, Note::from(60), Value7::from(0));
-    session2.send_midi(&note_off).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let got = *received_by_1.lock().await;
-    assert_eq!(got, Some(note_off));
+    session2.send_midi(&note_off.into()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let got = received_by_1.lock().await;
+    match got.as_ref() {
+        Some(MidiMessage::NoteOff(channel, note, velocity)) => {
+            if let MidiMessage::NoteOff(expected_channel, expected_note, expected_velocity) = note_off {
+                assert_eq!(channel, &expected_channel);
+                assert_eq!(note, &expected_note);
+                assert_eq!(velocity, &expected_velocity);
+            } else {
+                panic!("Expected a NoteOff message");
+            }
+        }
+        _ => panic!("Expected a NoteOff message"),
+    }
 }

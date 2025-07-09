@@ -22,8 +22,9 @@ async fn main() {
             // Filter for NoteOn commands
 
             use midi_types::MidiMessage;
+            use rtpmidi::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 
-            if let MidiMessage::NoteOn(channel, key, velocity) = command {
+            if let RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(channel, key, velocity)) = command {
                 use midi_types::Note;
 
                 let response = MidiMessage::NoteOn(
@@ -34,7 +35,7 @@ async fn main() {
 
                 let session_clone = session_clone.clone();
                 tokio::spawn(async move {
-                    match session_clone.send_midi(&response).await {
+                    match session_clone.send_midi(&response.into()).await {
                         Ok(_) => event!(Level::INFO, "MIDI packet sent successfully, {:?}", response),
                         Err(e) => event!(Level::INFO, "Error sending MIDI packet: {:?}", e),
                     };

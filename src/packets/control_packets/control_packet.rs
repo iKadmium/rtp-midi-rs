@@ -1,12 +1,13 @@
 use std::ffi::CStr;
 
+use anyhow::{Context, Result};
 use bytes::{Bytes, BytesMut};
 use zerocopy::{
     FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned,
     network_endian::{U32, U64},
 };
 
-use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
+use crate::packets::{control_packets::session_initiation_packet::SessionInitiationPacketBody, error::PacketParseError};
 
 use super::clock_sync_packet::ClockSyncPacket;
 
@@ -37,48 +38,55 @@ impl<'a> ControlPacket<'a> {
         buffer.starts_with(&CONTROL_PACKET_MARKER_VALUE)
     }
 
-    pub fn try_from_bytes(buffer: &'a [u8]) -> Result<Self, String> {
+    pub fn try_from_bytes(buffer: &'a [u8]) -> Result<Self> {
         if buffer.len() < 4 {
-            return Err("Buffer too short".into());
+            return Err(anyhow::Error::new(PacketParseError::NotEnoughData));
         }
 
         // Validate marker (2 bytes)
         if !buffer.starts_with(&CONTROL_PACKET_MARKER_VALUE) {
-            return Err("Invalid control packet marker".into());
+            return Err(anyhow::Error::new(PacketParseError::InvalidData));
         }
 
         // Parse command type (2 bytes)
         let command = &buffer[2..4];
-
         let remaining = &buffer[4..];
 
         // Parse body based on command type
         let result = match command {
             b"CK" => {
-                let clock_sync = ClockSyncPacket::ref_from_bytes(remaining).map_err(|_| "Failed to parse ClockSyncPacket")?;
+                let clock_sync = ClockSyncPacket::ref_from_bytes(remaining)
+                    .map_err(|_| PacketParseError::InvalidData)
+                    .context("Failed to parse Clock Sync Packet")?;
                 ControlPacket::ClockSync(clock_sync)
             }
             b"IN" => {
-                let (session_body, name_bytes) =
-                    SessionInitiationPacketBody::ref_from_prefix(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
-                let name = CStr::from_bytes_with_nul(name_bytes).map_err(|_| "Failed to parse CStr")?;
+                let (session_body, name_bytes) = SessionInitiationPacketBody::ref_from_prefix(remaining)
+                    .map_err(|_| PacketParseError::InvalidData)
+                    .context("Failed to parse Session Invitation Packet")?;
+                let name = CStr::from_bytes_with_nul(name_bytes).context("Failed to parse Session name from Session Invitation Packet")?;
                 ControlPacket::Invitation { body: session_body, name }
             }
             b"OK" => {
-                let (session_body, name_bytes) =
-                    SessionInitiationPacketBody::ref_from_prefix(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
-                let name = CStr::from_bytes_with_nul(name_bytes).map_err(|_| "Failed to parse CStr")?;
+                let (session_body, name_bytes) = SessionInitiationPacketBody::ref_from_prefix(remaining)
+                    .map_err(|_| PacketParseError::InvalidData)
+                    .context("Failed to parse Session Acceptance Packet")?;
+                let name = CStr::from_bytes_with_nul(name_bytes).context("Failed to parse Session name from Session Acceptance Packet")?;
                 ControlPacket::Acceptance { body: session_body, name }
             }
             b"NO" => {
-                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining)
+                    .map_err(|_| PacketParseError::InvalidData)
+                    .context("Failed to parse Session Rejection Packet")?;
                 ControlPacket::Rejection(session_body)
             }
             b"BY" => {
-                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining)
+                    .map_err(|_| PacketParseError::InvalidData)
+                    .context("Failed to parse Session Termination Packet")?;
                 ControlPacket::Termination(session_body)
             }
-            _ => return Err("Unknown command type".into()),
+            _ => return Err(anyhow::Error::new(PacketParseError::InvalidData).context(format!("Unknown control packet command: {:?}", command))),
         };
         Ok(result)
     }

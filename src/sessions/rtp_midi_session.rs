@@ -17,11 +17,12 @@ use super::invite_responder::InviteResponder;
 use super::mdns::advertise_mdns;
 use super::rtp_port::RtpPort;
 use crate::packets::midi_packets::midi_event::MidiEvent;
+use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use crate::participant::Participant;
 use crate::sessions::control_port::{ControlPort, MAX_CONTROL_PACKET_SIZE};
 use crate::sessions::midi_port::{MAX_MIDI_PACKET_SIZE, MidiPort};
 
-pub(super) type MidiPacketListener = dyn Fn(&MidiMessage) + Send + 'static;
+pub(super) type MidiPacketListener = dyn Fn(&RtpMidiMessage) + Send + 'static;
 pub(super) type ListenerSet = HashMap<RtpMidiEventType, Box<MidiPacketListener>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -200,17 +201,17 @@ impl RtpMidiSession {
 
     pub async fn add_listener<F>(&self, event_type: RtpMidiEventType, callback: F)
     where
-        F: Fn(&MidiMessage) + Send + 'static,
+        F: Fn(&RtpMidiMessage) + Send + 'static,
     {
         let mut listeners = self.listeners.lock().await;
         listeners.insert(event_type, Box::new(callback));
     }
 
-    pub async fn send_midi_batch(&self, commands: &[MidiEvent]) -> std::io::Result<()> {
+    pub async fn send_midi_batch<'a>(&self, commands: &[MidiEvent<'a>]) -> std::io::Result<()> {
         self.midi_port.send_midi_batch(self, commands).await
     }
 
-    pub async fn send_midi(&self, command: &MidiMessage) -> std::io::Result<()> {
+    pub async fn send_midi<'a>(&self, command: &RtpMidiMessage<'a>) -> std::io::Result<()> {
         self.midi_port.send_midi(self, command).await
     }
 

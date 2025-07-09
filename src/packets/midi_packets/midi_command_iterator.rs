@@ -25,7 +25,7 @@ impl<'a> MidiCommandIterator<'a> {
 }
 
 impl<'a> Iterator for MidiCommandIterator<'a> {
-    type Item = MidiEvent;
+    type Item = MidiEvent<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.data.is_empty() {
@@ -48,6 +48,8 @@ impl<'a> Iterator for MidiCommandIterator<'a> {
 mod tests {
     use midi_types::{Channel, MidiMessage, Note};
 
+    use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
+
     use super::*;
 
     #[test]
@@ -59,14 +61,14 @@ mod tests {
         assert_eq!(events[0].delta_time(), 0);
         assert_eq!(events[1].delta_time(), 11);
 
-        let MidiMessage::NoteOn(channel, key, velocity) = events[0].command() else {
+        let RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(channel, key, velocity)) = events[0].command() else {
             panic!("Unexpected MIDI command")
         };
         assert_eq!(*channel, Channel::from(1));
         assert_eq!(*key, Note::from(65));
         assert_eq!(*velocity, Into::into(0));
 
-        let MidiMessage::NoteOn(channel, key, velocity) = events[1].command() else {
+        let RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(channel, key, velocity)) = events[1].command() else {
             panic!("Unexpected MIDI command")
         };
         assert_eq!(*channel, Channel::from(1));

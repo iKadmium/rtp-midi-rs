@@ -2,18 +2,19 @@ use bytes::BytesMut;
 use midi_types::MidiMessage;
 
 use crate::packets::midi_packets::delta_time::read_delta_time;
+use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 
 use super::delta_time::WriteDeltaTimeExt;
 use super::midi_message_ext::ReadWriteExt;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MidiEvent {
+pub struct MidiEvent<'a> {
     delta_time: Option<u32>,
-    command: MidiMessage,
+    command: RtpMidiMessage<'a>,
 }
 
-impl MidiEvent {
-    pub fn new(delta_time: Option<u32>, command: MidiMessage) -> Self {
+impl<'a> MidiEvent<'a> {
+    pub fn new(delta_time: Option<u32>, command: RtpMidiMessage<'a>) -> Self {
         MidiEvent { delta_time, command }
     }
 
@@ -21,11 +22,11 @@ impl MidiEvent {
         self.delta_time.unwrap_or(0)
     }
 
-    pub fn command(&self) -> &MidiMessage {
+    pub fn command(&self) -> &RtpMidiMessage<'a> {
         &self.command
     }
 
-    pub fn from_be_bytes(bytes: &[u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &[u8])> {
+    pub fn from_be_bytes(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &[u8])> {
         let mut delta_time = None;
 
         let mut bytes = bytes;
@@ -63,11 +64,11 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         let timed_command = MidiEvent {
             delta_time: Some(delta_time),
-            command,
+            command: RtpMidiMessage::MidiMessage(command),
         };
 
         assert_eq!(timed_command.delta_time(), delta_time);
-        assert_eq!(timed_command.command(), &command);
+        assert_eq!(timed_command.command(), &RtpMidiMessage::MidiMessage(command));
     }
 
     #[test]
@@ -81,7 +82,7 @@ mod tests {
 
         let timed_command = MidiEvent {
             delta_time: Some(delta_time),
-            command,
+            command: RtpMidiMessage::MidiMessage(command),
         };
 
         let mut bytes = BytesMut::with_capacity(10);
@@ -97,7 +98,10 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
-        let timed_command = MidiEvent { delta_time: None, command };
+        let timed_command = MidiEvent {
+            delta_time: None,
+            command: RtpMidiMessage::MidiMessage(command),
+        };
 
         let mut bytes = BytesMut::with_capacity(10);
         timed_command.write(&mut bytes, None, false);
@@ -115,7 +119,10 @@ mod tests {
         let command = MidiMessage::NoteOn(Channel::C7, Note::C4, Value7::from(0x7F));
         command.write(&mut expected_bytes, None);
 
-        let timed_command = MidiEvent { delta_time: None, command };
+        let timed_command = MidiEvent {
+            delta_time: None,
+            command: RtpMidiMessage::MidiMessage(command),
+        };
 
         let mut bytes = BytesMut::with_capacity(10);
         timed_command.write(&mut bytes, None, true);
