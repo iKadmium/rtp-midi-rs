@@ -1,8 +1,10 @@
+use zerocopy::FromBytes;
+
 use super::{control_packets::control_packet::ControlPacket, midi_packets::midi_packet::MidiPacket};
 
 #[derive(Debug)]
 pub(crate) enum RtpMidiPacket<'a> {
-    Midi(MidiPacket<'a>),
+    Midi(&'a MidiPacket),
     Control(ControlPacket<'a>),
 }
 
@@ -11,7 +13,9 @@ impl<'a> RtpMidiPacket<'a> {
         if ControlPacket::is_control_packet(bytes) {
             ControlPacket::from_be_bytes(bytes).map(RtpMidiPacket::Control)
         } else {
-            MidiPacket::new(bytes).map(RtpMidiPacket::Midi)
+            let (packet, _remaining) =
+                MidiPacket::ref_from_prefix(bytes).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Failed to parse MIDI packet"))?;
+            Ok(RtpMidiPacket::Midi(packet))
         }
     }
 }

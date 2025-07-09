@@ -1,6 +1,6 @@
 use bytes::{BufMut, BytesMut};
 
-use crate::packets::midi_packets::midi_command_list_body::MidiCommandListBody;
+use crate::packets::midi_packets::{midi_command_list_body::MidiEventList, midi_event::MidiEvent};
 
 #[derive(Debug)]
 pub struct MidiCommandListHeader {
@@ -69,7 +69,7 @@ impl MidiCommandListHeader {
         MidiCommandListHeader { flags, length }
     }
 
-    pub fn build_for(events: &MidiCommandListBody, z_flag: bool) -> Self {
+    pub fn build_for(events: &[MidiEvent], z_flag: bool) -> Self {
         let length = events.size(z_flag);
         let b_flag = MidiCommandListFlags::needs_b_flag(length);
         let flags = MidiCommandListFlags::new(b_flag, false, false, z_flag);

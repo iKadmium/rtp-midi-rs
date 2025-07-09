@@ -4,30 +4,29 @@ use crate::packets::midi_packets::{delta_time::delta_time_size, midi_message_ext
 
 use super::midi_event::MidiEvent;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct MidiCommandListBody<'a> {
-    commands: &'a [MidiEvent],
+pub(super) trait MidiEventList {
+    fn write(&self, buffer: &mut BytesMut, z_flag: bool);
+    fn size(&self, z_flag: bool) -> usize;
 }
 
-impl<'a> MidiCommandListBody<'a> {
-    pub fn new(commands: &'a [MidiEvent]) -> Self {
-        Self { commands }
-    }
-
-    pub fn write(&self, buffer: &mut BytesMut, z_flag: bool) {
+impl<T: ?Sized> MidiEventList for T
+where
+    for<'a> &'a T: IntoIterator<Item = &'a MidiEvent>,
+{
+    fn write(&self, buffer: &mut BytesMut, z_flag: bool) {
         let mut write_delta_time = z_flag;
         let mut running_status: Option<u8> = None;
-        for command in self.commands {
+        for command in self {
             command.write(buffer, running_status, write_delta_time);
             running_status = Some(command.command().status());
             write_delta_time = true;
         }
     }
 
-    pub fn size(&self, z_flag: bool) -> usize {
+    fn size(&self, z_flag: bool) -> usize {
         let mut length: usize = 0;
         let mut running_status: Option<u8> = None;
-        for (i, command) in self.commands.iter().enumerate() {
+        for (i, command) in self.into_iter().enumerate() {
             if i > 0 || z_flag {
                 length += delta_time_size(command.delta_time())
             }
