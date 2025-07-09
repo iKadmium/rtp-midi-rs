@@ -1,31 +1,27 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use std::{
-    ffi::CStr,
-    io::{Error, ErrorKind},
+use std::ffi::CStr;
+
+use bytes::{Bytes, BytesMut};
+use zerocopy::{
+    FromBytes, Immutable, IntoBytes, KnownLayout, TryFromBytes, Unaligned,
+    network_endian::{U32, U64},
 };
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned, network_endian::U32};
 
 use crate::packets::control_packets::session_initiation_packet::SessionInitiationPacketBody;
 
 use super::clock_sync_packet::ClockSyncPacket;
 
-const CONTROL_PACKET_MARKER: [u8; 2] = [255, 255];
+const CONTROL_PACKET_MARKER_VALUE: [u8; 2] = [255, 255];
 
-#[derive(Debug, KnownLayout, Unaligned, IntoBytes, Immutable, FromBytes)]
+#[derive(TryFromBytes, Unaligned, KnownLayout, Immutable, Debug, Default, IntoBytes, Clone, Copy)]
+#[repr(u8)]
+enum ControlPacketMarkerEnum {
+    #[default]
+    AllOn = 0xFFu8,
+}
+
+#[derive(TryFromBytes, Unaligned, KnownLayout, Immutable, Debug, Default, IntoBytes, Clone, Copy)]
 #[repr(C)]
-pub struct ControlPacketHeader {
-    marker: [u8; 2],
-    pub command: [u8; 2],
-}
-
-impl ControlPacketHeader {
-    pub fn new(command: [u8; 2]) -> ControlPacketHeader {
-        ControlPacketHeader {
-            marker: CONTROL_PACKET_MARKER,
-            command,
-        }
-    }
-}
+struct ControlPacketMarker(ControlPacketMarkerEnum, ControlPacketMarkerEnum);
 
 #[derive(Debug)]
 pub enum ControlPacket<'a> {
@@ -36,74 +32,120 @@ pub enum ControlPacket<'a> {
     Termination(&'a SessionInitiationPacketBody),
 }
 
-impl ControlPacket<'_> {
-    pub fn from_be_bytes(buffer: &[u8]) -> std::io::Result<ControlPacket> {
-        let (header, remainder) =
-            ControlPacketHeader::ref_from_prefix(buffer).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid control packet header"))?;
-
-        match &header.command {
-            b"CK" => {
-                let clock_sync_packet =
-                    ClockSyncPacket::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid clock sync packet"))?;
-                Ok(ControlPacket::ClockSync(clock_sync_packet))
-            }
-            b"OK" | b"IN" => {
-                let (body, payload) =
-                    SessionInitiationPacketBody::ref_from_prefix(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid acceptance packet"))?;
-                let name = CStr::from_bytes_with_nul(payload).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid name in acceptance packet"))?;
-                if header.command == *b"OK" {
-                    Ok(ControlPacket::Acceptance { body, name })
-                } else {
-                    Ok(ControlPacket::Invitation { body, name })
-                }
-            }
-            b"NO" | b"BY" => {
-                let body =
-                    SessionInitiationPacketBody::ref_from_bytes(remainder).map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid rejection packet"))?;
-                if header.command == *b"NO" {
-                    Ok(ControlPacket::Rejection(body))
-                } else {
-                    Ok(ControlPacket::Termination(body))
-                }
-            }
-            _ => Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Unknown control packet, {}", String::from_utf8_lossy(&header.command)),
-            ))?,
-        }
-    }
-
+impl<'a> ControlPacket<'a> {
     pub fn is_control_packet(buffer: &[u8]) -> bool {
-        buffer.starts_with(&CONTROL_PACKET_MARKER)
+        buffer.starts_with(&CONTROL_PACKET_MARKER_VALUE)
     }
 
-    fn new_initiator(initiator_token: U32, sender_ssrc: U32, command: [u8; 2], name: Option<&CStr>) -> Bytes {
-        let header = ControlPacketHeader::new(command);
-        let packet = SessionInitiationPacketBody::new(initiator_token, sender_ssrc);
-        let name_length = name.map_or(0, |n| n.count_bytes() + 1); // +1 for null terminator
-        let mut buffer = BytesMut::with_capacity(std::mem::size_of::<ControlPacketHeader>() + std::mem::size_of::<SessionInitiationPacketBody>() + name_length);
-        buffer.put_slice(header.as_bytes());
-        buffer.put_slice(packet.as_bytes());
-        if let Some(name) = name {
-            buffer.put_slice(name.to_bytes_with_nul());
+    pub fn try_from_bytes(buffer: &'a [u8]) -> Result<Self, String> {
+        if buffer.len() < 4 {
+            return Err("Buffer too short".into());
         }
-        buffer.freeze()
+
+        // Validate marker (2 bytes)
+        if !buffer.starts_with(&CONTROL_PACKET_MARKER_VALUE) {
+            return Err("Invalid control packet marker".into());
+        }
+
+        // Parse command type (2 bytes)
+        let command = &buffer[2..4];
+
+        let remaining = &buffer[4..];
+
+        // Parse body based on command type
+        let result = match command {
+            b"CK" => {
+                let clock_sync = ClockSyncPacket::ref_from_bytes(remaining).map_err(|_| "Failed to parse ClockSyncPacket")?;
+                ControlPacket::ClockSync(clock_sync)
+            }
+            b"IN" => {
+                let (session_body, name_bytes) =
+                    SessionInitiationPacketBody::ref_from_prefix(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                let name = CStr::from_bytes_with_nul(name_bytes).map_err(|_| "Failed to parse CStr")?;
+                ControlPacket::Invitation { body: session_body, name }
+            }
+            b"OK" => {
+                let (session_body, name_bytes) =
+                    SessionInitiationPacketBody::ref_from_prefix(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                let name = CStr::from_bytes_with_nul(name_bytes).map_err(|_| "Failed to parse CStr")?;
+                ControlPacket::Acceptance { body: session_body, name }
+            }
+            b"NO" => {
+                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                ControlPacket::Rejection(session_body)
+            }
+            b"BY" => {
+                let session_body = SessionInitiationPacketBody::ref_from_bytes(remaining).map_err(|_| "Failed to parse SessionInitiationPacketBody")?;
+                ControlPacket::Termination(session_body)
+            }
+            _ => return Err("Unknown command type".into()),
+        };
+        Ok(result)
     }
 
-    pub fn new_acceptance(initiator_token: U32, sender_ssrc: U32, name: &CStr) -> Bytes {
-        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"OK", Some(name))
+    pub fn new_invitation_as_bytes(initiator_token: U32, ssrc: U32, name: &CStr) -> Bytes {
+        let body = SessionInitiationPacketBody::new(initiator_token, ssrc);
+        let name_bytes = name.to_bytes_with_nul();
+        let header = CONTROL_PACKET_MARKER_VALUE;
+        let command = b"IN";
+
+        let mut packet = BytesMut::with_capacity(header.len() + command.len() + body.as_bytes().len() + name_bytes.len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(command);
+        packet.extend_from_slice(body.as_bytes());
+        packet.extend_from_slice(name_bytes);
+        packet.freeze()
     }
 
-    pub fn new_invitation(initiator_token: U32, sender_ssrc: U32, name: &CStr) -> Bytes {
-        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"IN", Some(name))
+    pub fn new_acceptance_as_bytes(initiator_token: U32, ssrc: U32, name: &CStr) -> Bytes {
+        let body = SessionInitiationPacketBody::new(initiator_token, ssrc);
+        let name_bytes = name.to_bytes_with_nul();
+        let header = CONTROL_PACKET_MARKER_VALUE;
+        let command = b"OK";
+
+        let mut packet = BytesMut::with_capacity(header.len() + command.len() + body.as_bytes().len() + name_bytes.len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(command);
+        packet.extend_from_slice(body.as_bytes());
+        packet.extend_from_slice(name_bytes);
+        packet.freeze()
     }
 
-    pub fn new_rejection(initiator_token: U32, sender_ssrc: U32) -> Bytes {
-        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"NO", None)
+    pub fn new_rejection_as_bytes(initiator_token: U32, ssrc: U32) -> Bytes {
+        let body = SessionInitiationPacketBody::new(initiator_token, ssrc);
+        let header = CONTROL_PACKET_MARKER_VALUE;
+        let command = b"NO";
+
+        let mut packet = BytesMut::with_capacity(header.len() + command.len() + body.as_bytes().len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(command);
+        packet.extend_from_slice(body.as_bytes());
+        packet.freeze()
     }
 
-    pub fn new_termination(initiator_token: U32, sender_ssrc: U32) -> Bytes {
-        ControlPacket::new_initiator(initiator_token, sender_ssrc, *b"BY", None)
+    pub fn new_termination_as_bytes(initiator_token: U32, ssrc: U32) -> Bytes {
+        let body = SessionInitiationPacketBody::new(initiator_token, ssrc);
+        let header = CONTROL_PACKET_MARKER_VALUE;
+        let command = b"BY";
+
+        let mut packet = BytesMut::with_capacity(header.len() + command.len() + body.as_bytes().len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(command);
+        packet.extend_from_slice(body.as_bytes());
+        packet.freeze()
+    }
+
+    pub fn new_clock_sync_as_bytes(count: u8, timestamps: [U64; 3], sender_ssrc: U32) -> Bytes {
+        let clock_sync_packet = ClockSyncPacket::new(count, timestamps, sender_ssrc);
+        let packet_bytes = clock_sync_packet.as_bytes();
+        let header = CONTROL_PACKET_MARKER_VALUE;
+        let command = b"CK";
+
+        let mut packet = BytesMut::with_capacity(header.len() + command.len() + packet_bytes.len());
+        packet.extend_from_slice(&header);
+        packet.extend_from_slice(command);
+        packet.extend_from_slice(packet_bytes);
+        packet.freeze()
     }
 }
 
@@ -114,21 +156,15 @@ mod tests {
     #[test]
     fn test_parse_invalid_control_packet() {
         let data = vec![0, 0, 0, 0];
-        let result = ControlPacket::from_be_bytes(&data);
+        let result = ControlPacket::try_from_bytes(&data);
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.kind(), ErrorKind::InvalidData);
-        }
     }
 
     #[test]
     fn test_parse_too_short_control_packet() {
         let data = vec![255, 255, 67];
-        let result = ControlPacket::from_be_bytes(&data);
+        let result = ControlPacket::try_from_bytes(&data);
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.kind(), ErrorKind::InvalidData);
-        }
     }
 
     #[test]
@@ -142,18 +178,14 @@ mod tests {
     #[test]
     fn test_parse_unknown_control_packet() {
         let data = vec![255, 255, 0, 0];
-        let result = ControlPacket::from_be_bytes(&data);
+        let result = ControlPacket::try_from_bytes(&data);
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert_eq!(e.kind(), ErrorKind::InvalidData);
-            assert_eq!(e.to_string(), "Unknown control packet, \u{0}\u{0}");
-        }
     }
 
     #[test]
     fn test_read_clock_sync_packet_2() {
         let buffer = [
-            0xFF, 0xFF, 0x43, 0x4B, //header
+            0xFF, 0xFF, b'C', b'K', //header
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
             0x02, //count
             0x00, 0x00, 0x00, //reserved
@@ -162,9 +194,12 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, // timestamp 3
         ]; // Example buffer for a ClockSync packet
 
-        let result = ControlPacket::from_be_bytes(&buffer);
+        let result = ControlPacket::try_from_bytes(&buffer);
+        if let Err(e) = result {
+            panic!("Failed to parse control packet: {}", e);
+        }
         assert!(result.is_ok());
-        if let ControlPacket::ClockSync(packet) = result.unwrap() {
+        if let ControlPacket::ClockSync(packet) = &result.unwrap() {
             assert_eq!(packet.count, 2);
             assert_eq!(packet.sender_ssrc, 4112101049);
             assert_eq!(packet.timestamps[0], 1);
@@ -178,17 +213,21 @@ mod tests {
     #[test]
     fn test_read_session_initiation_packet() {
         let buffer = [
-            0xFF, 0xFF, 0x49, 0x4E, //header
+            0xFF, 0xFF, b'I', b'N', //header
             0x00, 0x00, 0x00, 0x02, //version
             0xF8, 0xD1, 0x80, 0xE6, //initiator token
             0xF5, 0x19, 0xAE, 0xB9, //sender ssrc
             0x4C, 0x6F, 0x76, 0x65, 0x6C, 0x79, 0x20, 0x53, 0x65, 0x73, 0x73, 0x69, 0x6F, 0x6E, 0x00, //name
         ];
 
-        let result = ControlPacket::from_be_bytes(&buffer);
+        let result = ControlPacket::try_from_bytes(&buffer);
+        if let Err(e) = result {
+            panic!("Failed to parse control packet: {}", e);
+        }
+
         assert!(result.is_ok());
-        if let ControlPacket::Invitation { body: _, name: _ } = result.unwrap() {
-            // all good!
+        if let ControlPacket::Invitation { body: _body, name } = &result.unwrap() {
+            assert_eq!(name.to_bytes(), b"Lovely Session");
         } else {
             panic!("Expected Invitation packet");
         }

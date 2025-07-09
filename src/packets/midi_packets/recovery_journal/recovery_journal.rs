@@ -1,10 +1,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use super::{
-    channel_journal::{
-        channel_journal::ChannelJournal, control_change_chapter::ControlChangeChapter,
-        program_change_chapter::ProgramChangeChapter,
-    },
+    channel_journal::{channel_journal::ChannelJournal, control_change_chapter::ControlChangeChapter, program_change_chapter::ProgramChangeChapter},
     system_journal::system_journal::SystemJournal,
 };
 
@@ -16,7 +13,7 @@ pub struct RecoveryJournal {
     h_flag: bool,
     total_channels: u8,
     checkpoint_sequence_number: u32,
-    system_journal: Option<SystemJournal>, // Optional system journal
+    system_journal: Option<SystemJournal>,                           // Optional system journal
     channel_journals: std::collections::HashMap<u8, ChannelJournal>, // Dictionary of channel journals
 }
 
@@ -26,11 +23,7 @@ impl RecoveryJournal {
         let y_flag = flags_and_channel_count & 0b0100_0000 != 0; // system journal present
         let checkpoint_sequence_number = u16::from_be_bytes(bytes[1..3].try_into().unwrap());
 
-        let system_journal = if y_flag {
-            Some(SystemJournal::from_be_bytes(&mut bytes[3..])?)
-        } else {
-            None
-        };
+        let system_journal = if y_flag { Some(SystemJournal::from_be_bytes(&mut bytes[3..])?) } else { None };
 
         let total_channels = (flags_and_channel_count & 0b0011_1111) as usize; // Total channels
 
@@ -61,17 +54,15 @@ impl RecoveryJournal {
 
             if has_program_change_chapter {
                 let chapter = reader.parse::<ProgramChangeChapter>()?;
-                channel_journal.chapters.insert(
-                    ChannelJournalType::ProgramChange,
-                    ChannelJournalChapter::ProgramChange(chapter),
-                );
+                channel_journal
+                    .chapters
+                    .insert(ChannelJournalType::ProgramChange, ChannelJournalChapter::ProgramChange(chapter));
             }
             if has_control_change_chapter {
                 let chapter = reader.parse::<ControlChangeChapter>()?;
-                channel_journal.chapters.insert(
-                    ChannelJournalType::ControlChange,
-                    ChannelJournalChapter::ControlChange(chapter),
-                );
+                channel_journal
+                    .chapters
+                    .insert(ChannelJournalType::ControlChange, ChannelJournalChapter::ControlChange(chapter));
             }
             channel_journals.insert(channel, channel_journal);
         }

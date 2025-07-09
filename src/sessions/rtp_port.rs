@@ -14,7 +14,7 @@ pub(super) trait RtpPort {
 
     #[instrument(skip_all, fields(destination = %destination))]
     async fn send_invitation_acceptance<'a>(&self, initiator_token: U32, destination: SocketAddr) {
-        let response_packet = ControlPacket::new_acceptance(initiator_token, self.ssrc(), self.session_name());
+        let response_packet = ControlPacket::new_acceptance_as_bytes(initiator_token, self.ssrc(), self.session_name());
 
         if let Err(e) = self.socket().send_to(&response_packet, destination).await {
             event!(Level::ERROR, "Failed to send invitation response: {}", e);
@@ -32,7 +32,7 @@ pub(super) trait RtpPort {
 
     #[instrument(skip_all, fields(destination = %participant.addr(), participant = participant.name().to_str().unwrap_or("Unknown")))]
     async fn send_termination_packet(&self, participant: &Participant) {
-        let termination_packet = ControlPacket::new_termination(participant.initiator_token().unwrap(), self.ssrc());
+        let termination_packet = ControlPacket::new_termination_as_bytes(participant.initiator_token().unwrap(), self.ssrc());
         let addr = Self::participant_addr(participant);
         if let Err(e) = self.socket().send_to(&termination_packet, addr).await {
             event!(Level::WARN, "Failed to send termination packet: {}", e);

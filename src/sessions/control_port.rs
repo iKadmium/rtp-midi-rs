@@ -55,7 +55,7 @@ impl ControlPort {
     #[instrument(skip_all, fields(name = %ctx.name(), addr = %addr))]
     pub async fn invite_participant(&self, ctx: &RtpMidiSession, addr: SocketAddr) {
         let initiator_token = U32::new(rand::random::<u32>());
-        let invitation = ControlPacket::new_invitation(initiator_token, self.ssrc, &self.session_name);
+        let invitation = ControlPacket::new_invitation_as_bytes(initiator_token, self.ssrc, &self.session_name);
         let result = self.socket.send_to(&invitation, addr).await;
         if let Err(e) = result {
             event!(Level::ERROR, "Failed to send session invitation: {}", e);
@@ -85,7 +85,7 @@ impl ControlPort {
         tracing::Span::current().record("src", src.to_string());
         event!(Level::TRACE, "Received {} bytes", amt);
 
-        let maybe_ctrl_packet = ControlPacket::from_be_bytes(&buf[..amt]);
+        let maybe_ctrl_packet = ControlPacket::try_from_bytes(&buf[..amt]);
         if let Err(e) = maybe_ctrl_packet {
             event!(Level::WARN, "Failed to parse control packet: {}", e);
             return;
@@ -137,7 +137,7 @@ impl ControlPort {
             self.send_invitation_acceptance(invitation.initiator_token, src).await;
         } else {
             event!(Level::INFO, "Rejected session initiation");
-            let rejection_packet = ControlPacket::new_rejection(invitation.initiator_token, self.ssrc);
+            let rejection_packet = ControlPacket::new_rejection_as_bytes(invitation.initiator_token, self.ssrc);
             let result = self.socket.send_to(&rejection_packet, src).await;
             if let Err(e) = result {
                 event!(Level::ERROR, "Failed to send session rejection: {}", e);
@@ -208,7 +208,7 @@ impl ControlPort {
             },
         );
 
-        let response_packet = ControlPacket::new_invitation(inv.token, self.ssrc, self.session_name.as_ref());
+        let response_packet = ControlPacket::new_invitation_as_bytes(inv.token, self.ssrc, self.session_name.as_ref());
         ctx.midi_port.send_invitation(&response_packet, midi_addr).await;
     }
 }

@@ -81,7 +81,7 @@ impl MidiPort {
         let packet = pachet.unwrap();
         event!(Level::TRACE, "Parsed RTP MIDI packet: {:?}", &packet);
         match packet {
-            RtpMidiPacket::Control(ref control_packet) => match control_packet {
+            RtpMidiPacket::Control(control_packet) => match control_packet {
                 ControlPacket::Invitation { body, name } => {
                     event!(Level::INFO, name = name.to_str().unwrap_or("Unknown"), "Received session invitation");
                     self.handle_invitation(body, name, src, ctx).await;
@@ -95,7 +95,7 @@ impl MidiPort {
                     self.handle_clock_sync(clock_sync_packet, ctx).await;
                 }
                 _ => {
-                    event!(Level::WARN, "Unhandled control packet {:?}", packet);
+                    event!(Level::WARN, "Unhandled control packet {:?}", control_packet);
                 }
             },
             RtpMidiPacket::Midi(midi_packet) => {
@@ -180,7 +180,7 @@ impl MidiPort {
         }
         timestamps[count as usize] = current_timestamp(self.start_time);
 
-        let packet = ClockSyncPacket::new_as_bytes(count, timestamps, self.ssrc);
+        let packet = ControlPacket::new_clock_sync_as_bytes(count, timestamps, self.ssrc);
         for participant in participants {
             if let Err(e) = self.socket.send_to(&packet, participant.midi_port_addr()).await {
                 event!(
