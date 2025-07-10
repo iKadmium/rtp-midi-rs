@@ -2,7 +2,7 @@ mod common;
 
 use common::find_consecutive_ports;
 use midi_types::{Channel, MidiMessage, Note, Value7};
-use rtpmidi::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
+use rtpmidi::sessions::events::event_handling::MidiMessageEvent;
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use std::net::SocketAddr;
@@ -12,8 +12,6 @@ use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn test_two_session_inter_communication() {
-    use rtpmidi::sessions::rtp_midi_session::RtpMidiEventType;
-
     let (control_port_1, _midi_port_1) = find_consecutive_ports();
     let (control_port_2, _midi_port_2) = find_consecutive_ports();
 
@@ -34,28 +32,22 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_1 = received_by_1.clone();
         session1
-            .add_listener(RtpMidiEventType::MidiPacket, {
+            .add_listener(MidiMessageEvent, move |message| {
                 let received_by_1 = received_by_1.clone();
-                move |message: &RtpMidiMessage| {
-                    if let RtpMidiMessage::MidiMessage(midi_message) = message {
-                        let received_by_1 = received_by_1.clone();
-                        received_by_1.blocking_lock().replace(*midi_message);
-                    }
-                }
+                tokio::spawn(async move {
+                    received_by_1.lock().await.replace(message);
+                });
             })
             .await;
     }
     {
         let received_by_2 = received_by_2.clone();
         session2
-            .add_listener(RtpMidiEventType::MidiPacket, {
+            .add_listener(MidiMessageEvent, move |message| {
                 let received_by_2 = received_by_2.clone();
-                move |message: &RtpMidiMessage| {
-                    if let RtpMidiMessage::MidiMessage(midi_message) = message {
-                        let received_by_2 = received_by_2.clone();
-                        received_by_2.blocking_lock().replace(*midi_message);
-                    }
-                }
+                tokio::spawn(async move {
+                    received_by_2.lock().await.replace(message);
+                });
             })
             .await;
     }

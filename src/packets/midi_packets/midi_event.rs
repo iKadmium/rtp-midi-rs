@@ -26,7 +26,7 @@ impl<'a> MidiEvent<'a> {
         &self.command
     }
 
-    pub fn from_be_bytes(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &[u8])> {
+    pub fn from_be_bytes(bytes: &'a [u8], include_delta_time: bool, running_status: Option<u8>) -> std::io::Result<(Self, &'a [u8])> {
         let mut delta_time = None;
 
         let mut bytes = bytes;

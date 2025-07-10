@@ -1,10 +1,7 @@
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use rtpmidi::sessions::{
-        invite_responder::InviteResponder,
-        rtp_midi_session::{RtpMidiEventType, RtpMidiSession},
-    };
+    use rtpmidi::sessions::{events::event_handling::MidiMessageEvent, invite_responder::InviteResponder, rtp_midi_session::RtpMidiSession};
     use tracing::{Level, event};
     use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -18,19 +15,18 @@ async fn main() {
 
     // Add a listener for incoming MIDI packets
     session
-        .add_listener(RtpMidiEventType::MidiPacket, move |command| {
+        .add_listener(MidiMessageEvent, move |message| {
             // Filter for NoteOn commands
 
             use midi_types::MidiMessage;
-            use rtpmidi::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 
-            if let RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(channel, key, velocity)) = command {
+            if let MidiMessage::NoteOn(channel, key, velocity) = message {
                 use midi_types::Note;
 
                 let response = MidiMessage::NoteOn(
-                    *channel,
-                    Note::from(u8::from(*key) - 12), // Down 1 octave
-                    *velocity,
+                    channel,
+                    Note::from(u8::from(key) - 12), // Down 1 octave
+                    velocity,
                 );
 
                 let session_clone = session_clone.clone();

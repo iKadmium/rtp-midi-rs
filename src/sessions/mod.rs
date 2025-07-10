@@ -1,4 +1,5 @@
 pub mod control_port;
+pub mod events;
 mod host_syncer;
 pub mod invite_responder;
 mod mdns;

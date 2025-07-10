@@ -1,4 +1,3 @@
-use midi_types::MidiMessage;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::net::SocketAddr;
@@ -20,15 +19,8 @@ use crate::packets::midi_packets::midi_event::MidiEvent;
 use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use crate::participant::Participant;
 use crate::sessions::control_port::{ControlPort, MAX_CONTROL_PACKET_SIZE};
+use crate::sessions::events::event_handling::{EventListeners, EventType};
 use crate::sessions::midi_port::{MAX_MIDI_PACKET_SIZE, MidiPort};
-
-pub(super) type MidiPacketListener = dyn Fn(&RtpMidiMessage) + Send + 'static;
-pub(super) type ListenerSet = HashMap<RtpMidiEventType, Box<MidiPacketListener>>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RtpMidiEventType {
-    MidiPacket,
-}
 
 #[derive(Clone)]
 pub struct RtpMidiSession {
@@ -36,7 +28,7 @@ pub struct RtpMidiSession {
     pub(super) pending_invitations: Arc<Mutex<HashMap<U32, PendingInvitation>>>, // key by ssrc
     pub(super) midi_port: Arc<MidiPort>,
 
-    listeners: Arc<Mutex<ListenerSet>>,
+    listeners: Arc<Mutex<EventListeners>>,
     control_port: Arc<ControlPort>,
     host_syncer: Arc<HostSyncer>,
     cancel_token: Arc<CancellationToken>,
@@ -63,7 +55,7 @@ impl RtpMidiSession {
             control_port: Arc::new(ControlPort::bind(port, cstr_name.to_owned(), U32::new(ssrc)).await?),
             midi_port: Arc::new(MidiPort::bind(port + 1, cstr_name.to_owned(), U32::new(ssrc)).await?),
             host_syncer: Arc::new(HostSyncer::new()),
-            listeners: Arc::new(Mutex::new(HashMap::new())),
+            listeners: Arc::new(Mutex::new(EventListeners::new())),
             cancel_token: Arc::new(CancellationToken::new()),
             task_handles: Arc::new(Mutex::new(Vec::new())),
             name: cstr_name,
@@ -199,12 +191,13 @@ impl RtpMidiSession {
         self.participants.lock().await.remove(&participant.ssrc());
     }
 
-    pub async fn add_listener<F>(&self, event_type: RtpMidiEventType, callback: F)
+    pub async fn add_listener<E, F>(&self, _event_type: E, callback: F)
     where
-        F: Fn(&RtpMidiMessage) + Send + 'static,
+        E: EventType,
+        F: for<'a> Fn(E::Data<'a>) + Send + 'static,
     {
         let mut listeners = self.listeners.lock().await;
-        listeners.insert(event_type, Box::new(callback));
+        E::add_listener_to_storage(&mut listeners, callback);
     }
 
     pub async fn send_midi_batch<'a>(&self, commands: &[MidiEvent<'a>]) -> std::io::Result<()> {

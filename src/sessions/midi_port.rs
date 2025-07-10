@@ -1,4 +1,4 @@
-use super::rtp_midi_session::{ListenerSet, RtpMidiSession, current_timestamp};
+use super::rtp_midi_session::{RtpMidiSession, current_timestamp};
 use super::rtp_port::RtpPort;
 use crate::packets::control_packets::clock_sync_packet::ClockSyncPacket;
 use crate::packets::control_packets::control_packet::ControlPacket;
@@ -8,8 +8,8 @@ use crate::packets::midi_packets::midi_packet::MidiPacket;
 use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use crate::packets::packet::RtpMidiPacket;
 use crate::participant::Participant;
-use crate::sessions::rtp_midi_session::{RtpMidiEventType, current_timestamp_u32};
-use midi_types::MidiMessage;
+use crate::sessions::events::event_handling::EventListeners;
+use crate::sessions::rtp_midi_session::current_timestamp_u32;
 use std::ffi::{CStr, CString};
 use std::iter;
 use std::net::SocketAddr;
@@ -62,7 +62,7 @@ impl MidiPort {
     }
 
     #[instrument(name = "MIDI", skip_all, fields(name = %ctx.name(), src, src_name))]
-    pub async fn start(&self, ctx: &RtpMidiSession, listeners: Arc<Mutex<ListenerSet>>, buf: &mut [u8; MAX_MIDI_PACKET_SIZE]) {
+    pub async fn start(&self, ctx: &RtpMidiSession, listeners: Arc<Mutex<EventListeners>>, buf: &mut [u8; MAX_MIDI_PACKET_SIZE]) {
         let recv = self.socket.recv_from(buf).await;
         if recv.is_err() {
             event!(Level::ERROR, "Failed to receive data on MIDI port: {}", recv.unwrap_err());
@@ -103,9 +103,16 @@ impl MidiPort {
                 event!(Level::DEBUG, "Parsed MIDI packet: {:#?}", midi_packet);
                 let mut seq = self.sequence_number.lock().await;
                 *seq = midi_packet.sequence_number().get().wrapping_add(1);
-                if let Some(callback) = listeners.lock().await.get(&RtpMidiEventType::MidiPacket) {
-                    for command in midi_packet.commands() {
-                        callback(&command.command());
+                for command in midi_packet.commands() {
+                    match command.command() {
+                        RtpMidiMessage::MidiMessage(message) => {
+                            event!(Level::DEBUG, "Received MIDI message: {:?}", message);
+                            listeners.lock().await.notify_midi_packet(*message);
+                        }
+                        RtpMidiMessage::SysEx(sysex) => {
+                            event!(Level::DEBUG, "Received SysEx message: {:?}", sysex);
+                            listeners.lock().await.notify_sysex_packet(sysex);
+                        }
                     }
                 }
             }

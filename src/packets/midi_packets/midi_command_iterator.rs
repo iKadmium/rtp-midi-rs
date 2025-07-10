@@ -1,4 +1,4 @@
-use crate::packets::midi_packets::{midi_event::MidiEvent, midi_message_ext::ReadWriteExt};
+use crate::packets::midi_packets::midi_event::MidiEvent;
 
 use super::midi_command_list_header::MidiCommandListHeader;
 
