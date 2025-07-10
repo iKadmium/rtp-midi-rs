@@ -32,7 +32,7 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_1 = received_by_1.clone();
         session1
-            .add_listener(MidiMessageEvent, move |message| {
+            .add_listener(MidiMessageEvent, move |(message, _delta_time)| {
                 let received_by_1 = received_by_1.clone();
                 tokio::spawn(async move {
                     received_by_1.lock().await.replace(message);
@@ -43,7 +43,7 @@ async fn test_two_session_inter_communication() {
     {
         let received_by_2 = received_by_2.clone();
         session2
-            .add_listener(MidiMessageEvent, move |message| {
+            .add_listener(MidiMessageEvent, move |(message, _delta_time)| {
                 let received_by_2 = received_by_2.clone();
                 tokio::spawn(async move {
                     received_by_2.lock().await.replace(message);

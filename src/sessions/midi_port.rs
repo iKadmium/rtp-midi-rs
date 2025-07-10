@@ -73,13 +73,13 @@ impl MidiPort {
         tracing::Span::current().record("src", src.to_string());
         event!(Level::TRACE, "Received {} bytes", amt);
 
-        let pachet = RtpMidiPacket::parse(&buf[..amt]);
-        if pachet.is_err() {
-            event!(Level::ERROR, "Failed to parse RTP MIDI packet: {}", pachet.unwrap_err());
+        let packet = RtpMidiPacket::parse(&buf[..amt]);
+        if packet.is_err() {
+            event!(Level::ERROR, "Failed to parse RTP MIDI packet: {}", packet.unwrap_err());
             return;
         }
 
-        let packet = pachet.unwrap();
+        let packet = packet.unwrap();
         event!(Level::TRACE, "Parsed RTP MIDI packet: {:?}", &packet);
         match packet {
             RtpMidiPacket::Control(control_packet) => match control_packet {
@@ -107,7 +107,7 @@ impl MidiPort {
                     match command.command() {
                         RtpMidiMessage::MidiMessage(message) => {
                             event!(Level::DEBUG, "Received MIDI message: {:?}", message);
-                            listeners.lock().await.notify_midi_packet(*message);
+                            listeners.lock().await.notify_midi_message(*message, command.delta_time());
                         }
                         RtpMidiMessage::SysEx(sysex) => {
                             event!(Level::DEBUG, "Received SysEx message: {:?}", sysex);

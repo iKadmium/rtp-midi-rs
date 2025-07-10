@@ -15,7 +15,7 @@ async fn main() {
 
     // Add a listener for incoming MIDI packets
     session
-        .add_listener(MidiMessageEvent, move |message| {
+        .add_listener(MidiMessageEvent, move |(message, _delta_time)| {
             // Filter for NoteOn commands
 
             use midi_types::MidiMessage;

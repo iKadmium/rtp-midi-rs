@@ -2,20 +2,20 @@ use midi_types::MidiMessage;
 
 use crate::participant::Participant;
 
-pub(super) type MidiPacketListener = dyn Fn(MidiMessage) + Send + 'static;
+pub(super) type MidiMessageListener = dyn Fn((MidiMessage, u32)) + Send + 'static;
 pub(super) type SysExPacketListener = dyn for<'a> Fn(&'a [u8]) + Send + 'static;
 pub(super) type ParticipantListener = dyn for<'a> Fn(&'a Participant) + Send + 'static;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RtpMidiEventType {
-    MidiPacket,
+    MidiMessage,
     SysExPacket,
     ParticipantJoined,
     ParticipantLeft,
 }
 
 pub struct EventListeners {
-    midi_packet: Vec<Box<MidiPacketListener>>,
+    midi_message: Vec<Box<MidiMessageListener>>,
     sysex_packet: Vec<Box<SysExPacketListener>>,
     participant_joined: Vec<Box<ParticipantListener>>,
     participant_left: Vec<Box<ParticipantListener>>,
@@ -35,13 +35,13 @@ pub trait EventType {
 }
 
 impl EventType for MidiMessageEvent {
-    type Data<'a> = MidiMessage;
+    type Data<'a> = (MidiMessage, u32);
 
     fn add_listener_to_storage<F>(listeners: &mut EventListeners, callback: F)
     where
         F: for<'a> Fn(Self::Data<'a>) + Send + 'static,
     {
-        listeners.midi_packet.push(Box::new(callback));
+        listeners.midi_message.push(Box::new(callback));
     }
 }
 
@@ -87,16 +87,16 @@ impl Default for EventListeners {
 impl EventListeners {
     pub fn new() -> Self {
         Self {
-            midi_packet: Vec::new(),
+            midi_message: Vec::new(),
             sysex_packet: Vec::new(),
             participant_joined: Vec::new(),
             participant_left: Vec::new(),
         }
     }
 
-    pub fn notify_midi_packet(&self, message: MidiMessage) {
-        for listener in &self.midi_packet {
-            listener(message);
+    pub fn notify_midi_message(&self, message: MidiMessage, delta_time: u32) {
+        for listener in &self.midi_message {
+            listener((message, delta_time));
         }
     }
 

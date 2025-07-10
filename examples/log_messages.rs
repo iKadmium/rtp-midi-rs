@@ -1,7 +1,11 @@
 #[cfg(feature = "examples")]
 #[tokio::main]
 async fn main() {
-    use rtpmidi::sessions::{events::event_handling::MidiMessageEvent, invite_responder::InviteResponder, rtp_midi_session::RtpMidiSession};
+    use rtpmidi::sessions::{
+        events::event_handling::{MidiMessageEvent, SysExPacketEvent},
+        invite_responder::InviteResponder,
+        rtp_midi_session::RtpMidiSession,
+    };
     use tracing::{Level, event};
     use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -14,6 +18,12 @@ async fn main() {
     session
         .add_listener(MidiMessageEvent, move |data| {
             event!(Level::INFO, "Received command: {:?}", data);
+        })
+        .await;
+
+    session
+        .add_listener(SysExPacketEvent, |data| {
+            event!(Level::INFO, "Received SysEx packet: {:?}", data);
         })
         .await;
 
