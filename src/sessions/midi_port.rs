@@ -89,7 +89,14 @@ impl MidiPort {
                 }
                 ControlPacket::Acceptance { body, name } => {
                     event!(Level::INFO, name = name.to_str().unwrap_or("Unknown"), "Received session acceptance");
-                    self.handle_acceptance(body, ctx).await;
+                    if let Ok(participant) = self.handle_acceptance(body, ctx).await {
+                        event!(
+                            Level::INFO,
+                            "Accepted MIDI port invitation from {}",
+                            participant.name().to_str().unwrap_or("Unknown")
+                        );
+                        listeners.lock().await.notify_participant_joined(&participant);
+                    }
                 }
                 ControlPacket::ClockSync(clock_sync_packet) => {
                     event!(Level::DEBUG, "Received clock sync from {}", src);
@@ -149,7 +156,7 @@ impl MidiPort {
     }
 
     #[instrument(skip_all, fields(token = %ack_body.initiator_token))]
-    async fn handle_acceptance(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession) {
+    async fn handle_acceptance(&self, ack_body: &SessionInitiationPacketBody, ctx: &RtpMidiSession) -> Result<Participant, &str> {
         let mut locked_pending_invitations = ctx.pending_invitations.lock().await;
 
         let inv = locked_pending_invitations.get(&ack_body.sender_ssrc).cloned();
@@ -159,12 +166,13 @@ impl MidiPort {
                 ssrc = ack_body.sender_ssrc.get(),
                 "Received Acceptance but no pending invitation found for this SSRC."
             );
-            return;
+            return Err("No pending invitation found");
         }
 
         let inv = inv.unwrap();
         if inv.token != ack_body.initiator_token {
             event!(Level::WARN, expected = inv.token.get(), "Received Acceptance with mismatched token",);
+            return Err("Token mismatch in acceptance");
         }
 
         locked_pending_invitations.remove(&ack_body.sender_ssrc);
@@ -175,6 +183,7 @@ impl MidiPort {
         ctx.participants.lock().await.insert(ack_body.sender_ssrc, participant.clone());
         let timestamps = [U64::new(0); 3];
         self.send_clock_sync(std::iter::once(&participant), timestamps, 1).await;
+        Ok(participant)
     }
 
     #[instrument(skip_all, fields(count = count))]
