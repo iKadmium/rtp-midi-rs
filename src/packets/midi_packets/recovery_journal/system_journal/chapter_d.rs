@@ -14,41 +14,13 @@ impl SystemChapterD {
         let flags = bytes[0];
         let mut i: usize = 1;
 
-        let reset = if flags & 0b0000_0001 != 0 {
-            Some(bytes[1])
-        } else {
-            None
-        };
-        let tune_request = if flags & 0b0000_0010 != 0 {
-            Some(bytes[2])
-        } else {
-            None
-        };
-        let song_select = if flags & 0b0000_0100 != 0 {
-            Some(bytes[3])
-        } else {
-            None
-        };
-        let undefined_system_common_j = if flags & 0b0000_1000 != 0 {
-            Some(bytes[4])
-        } else {
-            None
-        };
-        let undefined_system_common_k = if flags & 0b0001_0000 != 0 {
-            Some(bytes[5])
-        } else {
-            None
-        };
-        let undefined_system_realtime_y = if flags & 0b0010_0000 != 0 {
-            Some(bytes[6])
-        } else {
-            None
-        };
-        let undefined_system_realtime_z = if flags & 0b0100_0000 != 0 {
-            Some(bytes[7])
-        } else {
-            None
-        };
+        let reset = if flags & 0b0000_0001 != 0 { Some(bytes[1]) } else { None };
+        let tune_request = if flags & 0b0000_0010 != 0 { Some(bytes[2]) } else { None };
+        let song_select = if flags & 0b0000_0100 != 0 { Some(bytes[3]) } else { None };
+        let undefined_system_common_j = if flags & 0b0000_1000 != 0 { Some(bytes[4]) } else { None };
+        let undefined_system_common_k = if flags & 0b0001_0000 != 0 { Some(bytes[5]) } else { None };
+        let undefined_system_realtime_y = if flags & 0b0010_0000 != 0 { Some(bytes[6]) } else { None };
+        let undefined_system_realtime_z = if flags & 0b0100_0000 != 0 { Some(bytes[7]) } else { None };
         Ok(SystemChapterD {
             flags,
             reset,

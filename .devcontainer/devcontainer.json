@@ -3,7 +3,7 @@
 {
 	"name": "Rust",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/rust:1-1-bullseye",
+	"image": "mcr.microsoft.com/devcontainers/rust:latest",
 	// Use 'mounts' to make the cargo cache persistent in a Docker Volume.
 	// "mounts": [
 	// 	{
@@ -19,7 +19,7 @@
 	"runArgs": [
 		"-p=5004:5004/udp",
 		"-p=5005:5005/udp",
-		//"--network=host"
+		//"-p=5353:5353/udp",
 	],
 	"customizations": {
 		"vscode": {

@@ -21,9 +21,6 @@ impl SystemCommon {
             i += 1;
         }
 
-        Ok(SystemCommon {
-            flags_and_length,
-            values,
-        })
+        Ok(SystemCommon { flags_and_length, values })
     }
 }
