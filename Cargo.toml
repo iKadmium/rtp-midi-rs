@@ -49,3 +49,6 @@ default = ["tokio/net", "tokio/time", "tokio/rt", "tokio/macros", "tokio/sync"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[lints.clippy]
+uninlined_format_args = "warn"

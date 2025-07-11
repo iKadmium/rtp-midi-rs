@@ -86,7 +86,7 @@ impl<'a> ControlPacket<'a> {
                     .context("Failed to parse Session Termination Packet")?;
                 ControlPacket::Termination(session_body)
             }
-            _ => return Err(anyhow::Error::new(PacketParseError::InvalidData).context(format!("Unknown control packet command: {:?}", command))),
+            _ => return Err(anyhow::Error::new(PacketParseError::InvalidData).context(format!("Unknown control packet command: {command:?}"))),
         };
         Ok(result)
     }
@@ -204,7 +204,7 @@ mod tests {
 
         let result = ControlPacket::try_from_bytes(&buffer);
         if let Err(e) = result {
-            panic!("Failed to parse control packet: {}", e);
+            panic!("Failed to parse control packet: {e}");
         }
         assert!(result.is_ok());
         if let ControlPacket::ClockSync(packet) = &result.unwrap() {
@@ -230,7 +230,7 @@ mod tests {
 
         let result = ControlPacket::try_from_bytes(&buffer);
         if let Err(e) = result {
-            panic!("Failed to parse control packet: {}", e);
+            panic!("Failed to parse control packet: {e}");
         }
 
         assert!(result.is_ok());

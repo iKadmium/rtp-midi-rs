@@ -45,7 +45,7 @@ mod tests {
                 assert_eq!(packet.count, 0);
                 assert_eq!(packet.timestamps[0], 1926546830);
             }
-            Err(e) => panic!("Failed to read ClockSync packet: {}", e),
+            Err(e) => panic!("Failed to read ClockSync packet: {e}"),
         };
     }
 
@@ -69,7 +69,7 @@ mod tests {
                 assert_eq!(packet.timestamps[1], 71157727);
                 assert_eq!(packet.timestamps[2], 1926546893);
             }
-            Err(e) => panic!("Failed to read ClockSync packet: {}", e),
+            Err(e) => panic!("Failed to read ClockSync packet: {e}"),
         };
     }
 

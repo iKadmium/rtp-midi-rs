@@ -44,7 +44,7 @@ mod tests {
                 assert_eq!(body.initiator_token, 0xF8D180E6);
                 assert_eq!(body.sender_ssrc, 0xF519AEB9);
             }
-            Err(e) => panic!("Failed to read body: {}", e),
+            Err(e) => panic!("Failed to read body: {e}"),
         }
     }
 

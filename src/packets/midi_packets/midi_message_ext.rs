@@ -50,7 +50,7 @@ impl ReadWriteExt for MidiMessage {
             _ => {
                 // Handle other MIDI messages or SysEx messages here
                 // For now, we will panic if an unsupported message is encountered
-                panic!("Unsupported MIDI message type: {:?}", self);
+                panic!("Unsupported MIDI message type: {self:?}");
             }
         }
     }
@@ -64,7 +64,7 @@ impl ReadWriteExt for MidiMessage {
             MidiMessage::ProgramChange(channel, _) => status::PROGRAM_CHANGE | u8::from(*channel),
             MidiMessage::KeyPressure(channel, _, _) => status::KEY_PRESSURE | u8::from(*channel),
             MidiMessage::PitchBendChange(channel, _) => status::PITCH_BEND_CHANGE | u8::from(*channel),
-            _ => panic!("Unsupported MIDI message type: {:?}", self),
+            _ => panic!("Unsupported MIDI message type: {self:?}"),
         }
     }
 
