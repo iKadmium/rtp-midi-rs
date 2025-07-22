@@ -65,17 +65,17 @@ impl MidiPort {
     pub async fn start(&self, ctx: &RtpMidiSession, listeners: Arc<Mutex<EventListeners>>, buf: &mut [u8; MAX_MIDI_PACKET_SIZE]) {
         let recv = self.socket.recv_from(buf).await;
         if recv.is_err() {
-            event!(Level::ERROR, "Failed to receive data on MIDI port: {}", recv.unwrap_err());
+            event!(Level::ERROR, "Failed to receive data on MIDI port: {recv:?}");
             return;
         }
 
         let (amt, src) = recv.unwrap();
         tracing::Span::current().record("src", src.to_string());
-        event!(Level::TRACE, "Received {} bytes", amt);
+        event!(Level::TRACE, "Received {amt} bytes");
 
         let packet = RtpMidiPacket::parse(&buf[..amt]);
         if packet.is_err() {
-            event!(Level::ERROR, "Failed to parse RTP MIDI packet: {}", packet.unwrap_err());
+            event!(Level::ERROR, "Failed to parse RTP MIDI packet: {packet:?}");
             return;
         }
 
@@ -90,17 +90,23 @@ impl MidiPort {
                 ControlPacket::Acceptance { body, name } => {
                     event!(Level::INFO, name = name.to_str().unwrap_or("Unknown"), "Received session acceptance");
                     if let Ok(participant) = self.handle_acceptance(body, ctx).await {
-                        event!(
-                            Level::INFO,
-                            "Accepted MIDI port invitation from {}",
-                            participant.name().to_str().unwrap_or("Unknown")
-                        );
+                        event!(Level::INFO, "Accepted MIDI port invitation from {participant}");
                         listeners.lock().await.notify_participant_joined(&participant);
                     }
                 }
                 ControlPacket::ClockSync(clock_sync_packet) => {
                     event!(Level::DEBUG, "Received clock sync from {}", src);
                     self.handle_clock_sync(clock_sync_packet, ctx).await;
+                }
+                ControlPacket::Termination(body) => {
+                    event!(Level::INFO, "Received session termination from {}", src);
+                    let mut part_lock = ctx.participants.lock().await;
+                    if let Some(participant) = part_lock.remove(&body.sender_ssrc) {
+                        listeners.lock().await.notify_participant_left(&participant);
+                        event!(Level::INFO, "Removed participant: {participant}");
+                    } else {
+                        event!(Level::WARN, "No participant found for SSRC {}", body.sender_ssrc.get());
+                    }
                 }
                 _ => {
                     event!(Level::WARN, "Unhandled control packet {:?}", control_packet);
@@ -113,11 +119,11 @@ impl MidiPort {
                 for command in midi_packet.commands() {
                     match command.command() {
                         RtpMidiMessage::MidiMessage(message) => {
-                            event!(Level::DEBUG, "Received MIDI message: {:?}", message);
+                            event!(Level::DEBUG, "Received MIDI message: {message:?}");
                             listeners.lock().await.notify_midi_message(*message, command.delta_time());
                         }
                         RtpMidiMessage::SysEx(sysex) => {
-                            event!(Level::DEBUG, "Received SysEx message: {:?}", sysex);
+                            event!(Level::DEBUG, "Received SysEx message: {sysex:?}");
                             listeners.lock().await.notify_sysex_packet(sysex);
                         }
                     }
@@ -204,8 +210,7 @@ impl MidiPort {
                     Level::WARN,
                     name = participant.name().to_str().unwrap_or("Unknown"),
                     addr = %participant.midi_port_addr(),
-                    "Failed to send clock sync: {}",
-                    e
+                    "Failed to send clock sync: {e}"
                 );
             } else {
                 event!(Level::DEBUG, name = participant.name().to_str().unwrap_or("Unknown"), "Sent clock sync");
@@ -268,7 +273,7 @@ impl MidiPort {
         event!(Level::DEBUG, "Sending session invitation");
         let result = self.socket.send_to(invitation, addr).await;
         if let Err(e) = result {
-            event!(Level::WARN, "Failed to send session invitation: {}", e);
+            event!(Level::WARN, "Failed to send session invitation: {e}");
         } else {
             event!(Level::INFO, "Sent session invitation");
         }

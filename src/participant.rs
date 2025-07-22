@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString},
+    fmt::Display,
     net::SocketAddr,
     time::Instant,
 };
@@ -58,5 +59,17 @@ impl Participant {
 
     pub fn ssrc(&self) -> U32 {
         self.ssrc
+    }
+}
+
+impl Display for Participant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Participant {{ name: {}, addr: {}, ssrc: {} }}",
+            self.name.to_str().unwrap_or("Unknown"),
+            self.ctrl_addr,
+            self.ssrc.get()
+        )
     }
 }
