@@ -1,6 +1,6 @@
 use bytes::{BufMut, BytesMut};
 use midi_types::{
-    Channel, Control, MidiMessage, Note, Program, Value7, Value14,
+    Channel, Control, MidiMessage, Note, Program, QuarterFrame, Value7, Value14,
     status::{self},
 };
 
@@ -65,7 +65,16 @@ impl ReadWriteExt for MidiMessage {
             MidiMessage::ProgramChange(channel, _) => status::PROGRAM_CHANGE | u8::from(*channel),
             MidiMessage::KeyPressure(channel, _, _) => status::KEY_PRESSURE | u8::from(*channel),
             MidiMessage::PitchBendChange(channel, _) => status::PITCH_BEND_CHANGE | u8::from(*channel),
-            _ => panic!("Unsupported MIDI message type: {self:?}"),
+            MidiMessage::QuarterFrame(_data) => status::QUARTER_FRAME,
+            MidiMessage::SongPositionPointer(_song_position) => status::SONG_POSITION_POINTER,
+            MidiMessage::SongSelect(_song_number) => status::SONG_SELECT,
+            MidiMessage::TuneRequest => status::TUNE_REQUEST,
+            MidiMessage::TimingClock => status::TIMING_CLOCK,
+            MidiMessage::Start => status::START,
+            MidiMessage::Continue => status::CONTINUE,
+            MidiMessage::Stop => status::STOP,
+            MidiMessage::ActiveSensing => status::ACTIVE_SENSING,
+            MidiMessage::Reset => status::RESET,
         }
     }
 
@@ -86,8 +95,17 @@ impl ReadWriteExt for MidiMessage {
                 let end_index = bytes.iter().position(|&b| b == 0xF7).unwrap_or(bytes.len());
                 RtpMidiMessage::SysEx(&bytes[1..end_index])
             }
+            0xF1 => RtpMidiMessage::MidiMessage(MidiMessage::QuarterFrame(QuarterFrame::from(bytes[0]))),
+            0xF2 => RtpMidiMessage::MidiMessage(MidiMessage::SongPositionPointer(Value14::from((bytes[0], bytes[1])))),
+            0xF3 => RtpMidiMessage::MidiMessage(MidiMessage::SongSelect(Value7::from(bytes[0]))),
+            0xF6 => RtpMidiMessage::MidiMessage(MidiMessage::TuneRequest),
             0xF8 => RtpMidiMessage::MidiMessage(MidiMessage::TimingClock),
-            _ => unreachable!("Unsupported MIDI command type: {}", status_byte),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Unsupported MIDI status byte: {status_byte:#02X}"),
+                ));
+            }
         };
 
         let remaining = &bytes[command.len() - 1..];
