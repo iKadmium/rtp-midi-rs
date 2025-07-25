@@ -120,7 +120,8 @@ impl MidiPort {
                     match command.command() {
                         RtpMidiMessage::MidiMessage(message) => {
                             event!(Level::DEBUG, "Received MIDI message: {message:?}");
-                            listeners.lock().await.notify_midi_message(*message, command.delta_time());
+                            let timestamp = u32::from(midi_packet.timestamp()) + command.delta_time();
+                            listeners.lock().await.notify_midi_message(*message, timestamp);
                         }
                         RtpMidiMessage::SysEx(sysex) => {
                             event!(Level::DEBUG, "Received SysEx message: {sysex:?}");
