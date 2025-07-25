@@ -5,11 +5,12 @@ use midi_types::{
 };
 
 use crate::packets::midi_packets::{rtp_midi_message::RtpMidiMessage, util::StatusBit};
+use std::io::Result;
 
 pub(super) trait ReadWriteExt {
     fn write(&self, writer: &mut BytesMut, running_status: Option<u8>);
     fn status(&self) -> u8;
-    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (RtpMidiMessage, &[u8]);
+    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> std::io::Result<(RtpMidiMessage, &[u8])>;
     fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(RtpMidiMessage, &[u8])>;
 }
 
@@ -68,7 +69,7 @@ impl ReadWriteExt for MidiMessage {
         }
     }
 
-    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> (RtpMidiMessage, &[u8]) {
+    fn from_status_byte(status_byte: u8, channel: u8, bytes: &[u8]) -> Result<(RtpMidiMessage, &[u8])> {
         let command = match status_byte {
             0x80..0x90 => RtpMidiMessage::MidiMessage(MidiMessage::NoteOff(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1]))),
             0x90..0xA0 => RtpMidiMessage::MidiMessage(MidiMessage::NoteOn(Channel::from(channel), Note::from(bytes[0]), Value7::from(bytes[1]))),
@@ -85,11 +86,12 @@ impl ReadWriteExt for MidiMessage {
                 let end_index = bytes.iter().position(|&b| b == 0xF7).unwrap_or(bytes.len());
                 RtpMidiMessage::SysEx(&bytes[1..end_index])
             }
+            0xF8 => RtpMidiMessage::MidiMessage(MidiMessage::TimingClock),
             _ => unreachable!("Unsupported MIDI command type: {}", status_byte),
         };
 
         let remaining = &bytes[command.len() - 1..];
-        (command, remaining)
+        Ok((command, remaining))
     }
 
     fn from_be_bytes(bytes: &[u8], running_status: Option<u8>) -> std::io::Result<(RtpMidiMessage, &[u8])> {
@@ -102,7 +104,7 @@ impl ReadWriteExt for MidiMessage {
             )
         };
         let channel = status_byte & 0x0F;
-        Ok(Self::from_status_byte(status_byte, channel, bytes))
+        Self::from_status_byte(status_byte, channel, bytes)
     }
 }
 
