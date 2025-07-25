@@ -8,7 +8,7 @@ debug = false
 
 [package]
 name = "rtpmidi"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 authors = ["Jesse Higginson "]
 description = "A library for RTP-MIDI / AppleMIDI"
