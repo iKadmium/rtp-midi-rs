@@ -17,9 +17,10 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	"runArgs": [
-		"-p=5004:5004/udp",
-		"-p=5005:5005/udp",
+		// "-p=5004:5004/udp",
+		// "-p=5005:5005/udp",
 		//"-p=5353:5353/udp",
+		"--network=host"
 	],
 	"customizations": {
 		"vscode": {

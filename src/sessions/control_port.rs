@@ -188,6 +188,7 @@ impl ControlPort {
                 inv.token,
                 ack_body.initiator_token.get()
             );
+            return;
         }
 
         event!(
@@ -198,17 +199,20 @@ impl ControlPort {
 
         let midi_addr = SocketAddr::new(inv.addr.ip(), inv.addr.port() + 1);
 
+        // Generate a new token specifically for the MIDI port invitation
+        let midi_token = U32::new(rand::random::<u32>());
+
         let mut lock = ctx.pending_invitations.lock().await;
         lock.insert(
             ack_body.sender_ssrc,
             PendingInvitation {
                 addr: midi_addr,
-                token: inv.token,
+                token: midi_token,
                 name: name.to_owned(),
             },
         );
 
-        let response_packet = ControlPacket::new_invitation_as_bytes(inv.token, self.ssrc, self.session_name.as_ref());
+        let response_packet = ControlPacket::new_invitation_as_bytes(midi_token, self.ssrc, self.session_name.as_ref());
         ctx.midi_port.send_invitation(&response_packet, midi_addr).await;
     }
 }

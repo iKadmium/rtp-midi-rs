@@ -139,24 +139,15 @@ impl MidiPort {
             None => {
                 event!(Level::WARN, "Received unexpected MIDI port invitation for SSRC {}", body.sender_ssrc.get());
             }
-            Some(inv) => {
+            Some(_inv) => {
                 event!(Level::DEBUG, "Found pending invitation for SSRC {}", body.sender_ssrc.get());
-                if inv.token != body.initiator_token {
-                    event!(
-                        Level::WARN,
-                        expected = inv.token.get(),
-                        received = body.initiator_token.get(),
-                        "Token mismatch in invitation"
-                    );
-                    return;
-                } else {
-                    let ctrl_addr = SocketAddr::new(src.ip(), src.port() - 1);
-                    ctx.participants.lock().await.insert(
-                        body.sender_ssrc,
-                        Participant::new(ctrl_addr, false, Some(body.initiator_token), sender_name, body.sender_ssrc),
-                    );
-                    self.send_invitation_acceptance(body.initiator_token, src).await;
-                }
+
+                let ctrl_addr = SocketAddr::new(src.ip(), src.port() - 1);
+                ctx.participants.lock().await.insert(
+                    body.sender_ssrc,
+                    Participant::new(ctrl_addr, false, Some(body.initiator_token), sender_name, body.sender_ssrc),
+                );
+                self.send_invitation_acceptance(body.initiator_token, src).await;
             }
         }
     }
