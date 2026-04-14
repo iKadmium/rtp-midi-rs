@@ -116,18 +116,28 @@ impl MidiPort {
                 event!(Level::DEBUG, "Parsed MIDI packet: {:#?}", midi_packet);
                 let mut seq = self.sequence_number.lock().await;
                 *seq = midi_packet.sequence_number().get().wrapping_add(1);
+
+                // Collect MIDI messages with their delta times
+                let mut midi_events = Vec::new();
+
                 for command in midi_packet.commands() {
                     match command.command() {
                         RtpMidiMessage::MidiMessage(message) => {
                             event!(Level::DEBUG, "Received MIDI message: {message:?}");
-                            let timestamp = u32::from(midi_packet.timestamp()) + command.delta_time();
-                            listeners.lock().await.notify_midi_message(*message, timestamp);
+                            // Convert delta_time from 10kHz units to Duration (100μs per tick)
+                            let delta = std::time::Duration::from_micros(command.delta_time() as u64 * 100);
+                            midi_events.push((*message, delta));
                         }
                         RtpMidiMessage::SysEx(sysex) => {
                             event!(Level::DEBUG, "Received SysEx message: {sysex:?}");
-                            listeners.lock().await.notify_sysex_packet(sysex);
+                            listeners.lock().await.notify_sysex(sysex.to_vec());
                         }
                     }
+                }
+
+                // Notify listeners with batch of MIDI messages
+                if !midi_events.is_empty() {
+                    listeners.lock().await.notify_midi_messages(midi_events);
                 }
             }
         }
