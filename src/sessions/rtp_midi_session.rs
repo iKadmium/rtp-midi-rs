@@ -19,7 +19,7 @@ use crate::packets::midi_packets::midi_event::MidiEvent;
 use crate::packets::midi_packets::rtp_midi_message::RtpMidiMessage;
 use crate::participant::Participant;
 use crate::sessions::control_port::{ControlPort, MAX_CONTROL_PACKET_SIZE};
-use crate::sessions::events::event_handling::{EventListeners, EventType};
+use crate::sessions::events::event_handling::EventListeners;
 use crate::sessions::midi_port::{MAX_MIDI_PACKET_SIZE, MidiPort};
 
 #[derive(Clone)]
@@ -191,13 +191,88 @@ impl RtpMidiSession {
         self.participants.lock().await.remove(&participant.ssrc());
     }
 
-    pub async fn add_listener<E, F>(&self, _event_type: E, callback: F)
-    where
-        E: EventType,
-        F: for<'a> Fn(E::Data<'a>) + Send + 'static,
-    {
-        let mut listeners = self.listeners.lock().await;
-        E::add_listener_to_storage(&mut listeners, callback);
+    /// Subscribe to MIDI message events.
+    ///
+    /// Returns a channel receiver that yields batches of MIDI messages with their delta times.
+    /// Delta times are relative to the previous message in each batch.
+    ///
+    /// Multiple subscriptions are supported - each subscriber gets their own receiver.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+    /// # use rtpmidi::sessions::invite_responder::InviteResponder;
+    /// # async fn example() {
+    /// let session = RtpMidiSession::start(5004, "Session", 12345, InviteResponder::Accept)
+    ///     .await
+    ///     .unwrap();
+    ///
+    /// let mut midi_rx = session.subscribe_midi_messages().await;
+    ///
+    /// while let Ok(events) = midi_rx.recv().await {
+    ///     for (message, delta) in events {
+    ///         println!("Message: {:?}, Delta: {:?}", message, delta);
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    pub async fn subscribe_midi_messages(&self) -> tokio::sync::broadcast::Receiver<Vec<(midi_types::MidiMessage, std::time::Duration)>> {
+        let listeners = self.listeners.lock().await;
+        listeners.subscribe_midi_messages()
+    }
+
+    /// Subscribe to SysEx packet events.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+    /// # use rtpmidi::sessions::invite_responder::InviteResponder;
+    /// # async fn example() {
+    /// let session = RtpMidiSession::start(5004, "Session", 12345, InviteResponder::Accept)
+    ///     .await
+    ///     .unwrap();
+    ///
+    /// let mut sysex_rx = session.subscribe_sysex().await;
+    ///
+    /// while let Ok(data) = sysex_rx.recv().await {
+    ///     println!("SysEx: {} bytes", data.len());
+    /// }
+    /// # }
+    /// ```
+    pub async fn subscribe_sysex(&self) -> tokio::sync::broadcast::Receiver<Vec<u8>> {
+        let listeners = self.listeners.lock().await;
+        listeners.subscribe_sysex()
+    }
+
+    /// Subscribe to participant events (joined/left).
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
+    /// # use rtpmidi::sessions::invite_responder::InviteResponder;
+    /// # use rtpmidi::sessions::events::ParticipantEvent;
+    /// # async fn example() {
+    /// let session = RtpMidiSession::start(5004, "Session", 12345, InviteResponder::Accept)
+    ///     .await
+    ///     .unwrap();
+    ///
+    /// let mut participant_rx = session.subscribe_participants().await;
+    ///
+    /// while let Ok(event) = participant_rx.recv().await {
+    ///     match event {
+    ///         ParticipantEvent::Joined(p) => {
+    ///             println!("Joined: {}", p.name().to_string_lossy());
+    ///         }
+    ///         ParticipantEvent::Left(p) => {
+    ///             println!("Left: {}", p.name().to_string_lossy());
+    ///         }
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    pub async fn subscribe_participants(&self) -> tokio::sync::broadcast::Receiver<crate::sessions::events::event_handling::ParticipantEvent> {
+        let listeners = self.listeners.lock().await;
+        listeners.subscribe_participants()
     }
 
     pub async fn send_midi_batch<'a>(&self, commands: &[MidiEvent<'a>]) -> std::io::Result<()> {

@@ -3,7 +3,6 @@ mod common;
 use common::find_consecutive_ports;
 use core::panic;
 use midi_types::{Channel, MidiMessage, Note, Value7};
-use rtpmidi::sessions::events::event_handling::{MidiMessageEvent, ParticipantJoinedEvent};
 use rtpmidi::sessions::invite_responder::InviteResponder;
 use rtpmidi::sessions::rtp_midi_session::RtpMidiSession;
 use std::net::SocketAddr;
@@ -25,27 +24,18 @@ async fn test_two_session_inter_communication() {
         .expect("Failed to start RTP MIDI session");
 
     let sessions_connected = Arc::new(Notify::new());
-    let (session1_message_sender, mut session1_message_receiver) = tokio::sync::mpsc::unbounded_channel::<MidiMessage>();
-    let (session2_message_sender, mut session2_message_receiver) = tokio::sync::mpsc::unbounded_channel::<MidiMessage>();
 
-    session1
-        .add_listener(MidiMessageEvent, move |(message, _delta_time)| {
-            session1_message_sender.send(message).unwrap();
-        })
-        .await;
+    let mut session1_midi_rx = session1.subscribe_midi_messages().await;
+    let mut session1_participant_rx = session1.subscribe_participants().await;
+    let mut session2_midi_rx = session2.subscribe_midi_messages().await;
 
+    // Spawn task to wait for participant connection
     let sessions_connected_clone = sessions_connected.clone();
-    session1
-        .add_listener(ParticipantJoinedEvent, move |_participant| {
+    tokio::spawn(async move {
+        if session1_participant_rx.recv().await.is_ok() {
             sessions_connected_clone.notify_one();
-        })
-        .await;
-
-    session2
-        .add_listener(MidiMessageEvent, move |(message, _delta_time)| {
-            session2_message_sender.send(message).unwrap();
-        })
-        .await;
+        }
+    });
 
     // Invite each other
     let addr1 = SocketAddr::new("127.0.0.1".parse().unwrap(), control_port_1);
@@ -66,35 +56,43 @@ async fn test_two_session_inter_communication() {
     let note_on = MidiMessage::NoteOn(Channel::C1, Note::from(60), Value7::from(100));
     session1.send_midi(&note_on.into()).await.unwrap();
 
-    let result = session2_message_receiver.recv().await;
-    match result.as_ref() {
-        Some(MidiMessage::NoteOn(channel, note, velocity)) => {
-            if let MidiMessage::NoteOn(expected_channel, expected_note, expected_velocity) = note_on {
-                assert_eq!(channel, &expected_channel);
-                assert_eq!(note, &expected_note);
-                assert_eq!(velocity, &expected_velocity);
+    let events = session2_midi_rx.recv().await.expect("Should receive MIDI events");
+    assert!(!events.is_empty(), "Should receive at least one message");
+    let (received_message, _delta) = events[0];
+
+    match received_message {
+        MidiMessage::NoteOn(channel, note, velocity) => {
+            if let MidiMessage::NoteOn(expected_channel, expected_note, expected_velocity) = note_on
+            {
+                assert_eq!(channel, expected_channel);
+                assert_eq!(note, expected_note);
+                assert_eq!(velocity, expected_velocity);
             } else {
                 panic!("Expected a NoteOn message");
             }
         }
-        _ => panic!("Expected a NoteOn message"),
+        _ => panic!("Expected a NoteOn message, got {:?}", received_message),
     }
 
     // Send from session2 to session1
     let note_off = MidiMessage::NoteOff(Channel::C1, Note::from(60), Value7::from(0));
     session2.send_midi(&note_off.into()).await.unwrap();
 
-    let result = session1_message_receiver.recv().await;
-    match result.as_ref() {
-        Some(MidiMessage::NoteOff(channel, note, velocity)) => {
-            if let MidiMessage::NoteOff(expected_channel, expected_note, expected_velocity) = note_off {
-                assert_eq!(channel, &expected_channel);
-                assert_eq!(note, &expected_note);
-                assert_eq!(velocity, &expected_velocity);
+    let events = session1_midi_rx.recv().await.expect("Should receive MIDI events");
+    assert!(!events.is_empty(), "Should receive at least one message");
+    let (received_message, _delta) = events[0];
+
+    match received_message {
+        MidiMessage::NoteOff(channel, note, velocity) => {
+            if let MidiMessage::NoteOff(expected_channel, expected_note, expected_velocity) = note_off
+            {
+                assert_eq!(channel, expected_channel);
+                assert_eq!(note, expected_note);
+                assert_eq!(velocity, expected_velocity);
             } else {
                 panic!("Expected a NoteOff message");
             }
         }
-        _ => panic!("Expected a NoteOff message"),
+        _ => panic!("Expected a NoteOff message, got {:?}", received_message),
     }
 }
